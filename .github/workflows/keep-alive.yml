@@ -1,0 +1,33 @@
+# Keeps the free Supabase project awake by writing a daily heartbeat.
+# A database write is real activity, which resets Supabase's 7-day
+# inactivity timer — so the project never pauses.
+#
+# In your GitHub repo, create this file at exactly:
+#     .github/workflows/keep-alive.yml
+# and add two repository secrets (Settings -> Secrets and variables ->
+# Actions):  SUPABASE_URL  and  SUPABASE_KEY  — the same two values
+# you put in the app's CONFIG block.
+
+name: Keep Supabase Awake
+
+on:
+  schedule:
+    # Daily at 09:17 UTC. An off-the-hour minute is used on purpose —
+    # GitHub's scheduler is busiest exactly on the hour.
+    - cron: "17 9 * * *"
+  workflow_dispatch:        # also lets you run it by hand from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write heartbeat to Supabase
+        run: |
+          curl --fail --silent --show-error -X POST \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/keep_alive" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "{\"id\":1,\"last_ping\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+          echo "Supabase heartbeat sent at $(date -u)."
