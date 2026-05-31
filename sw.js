@@ -2,7 +2,7 @@
    Caches the app shell so it launches instantly (even offline).
    Live data always goes to the network — Supabase traffic is never cached. */
 
-var CACHE = "inventory-shell-v1";
+var CACHE = "inventory-shell-v2";
 
 var CORE = [
   "./",
