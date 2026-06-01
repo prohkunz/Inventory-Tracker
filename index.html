@@ -1159,7 +1159,7 @@
       var change = (tendered != null && !isNaN(tendered)) ? tendered - subtotal : null;
       html += '<div class="cash-row">' +
         '<div><div class="lbl">Tendered</div>' +
-        '<input id="cashTendered" type="number" min="0" step="0.01" inputmode="decimal" ' +
+        '<input id="cashTendered" type="text" inputmode="decimal" autocomplete="off" ' +
           'placeholder="0.00" value="' + (state.payment.tendered === "" ? "" : state.payment.tendered) + '" /></div>' +
         '<div><div class="lbl">Change</div>' +
         '<div class="val change ' + (change == null ? "" : (change >= 0 ? "pos" : "neg")) + '">' +
@@ -1175,15 +1175,39 @@
 
     c.innerHTML = html;
 
-    // wire up cash tendered live updates
+    // Live-update change & complete-button as the user types — without
+    // re-rendering the input itself, which would lose focus and scramble
+    // the entered text.
     var ct = document.getElementById("cashTendered");
     if (ct) {
       ct.addEventListener("input", function () {
-        state.payment.tendered = ct.value;
-        renderCart();
-        // keep focus
-        var nt = document.getElementById("cashTendered");
-        if (nt) { nt.focus(); nt.setSelectionRange(ct.value.length, ct.value.length); }
+        // strip anything that isn't a digit or a decimal point; allow only one dot
+        var raw = ct.value;
+        var cleaned = raw.replace(/[^0-9.]/g, "");
+        var firstDot = cleaned.indexOf(".");
+        if (firstDot >= 0) {
+          cleaned = cleaned.slice(0, firstDot + 1) +
+                    cleaned.slice(firstDot + 1).replace(/\./g, "");
+        }
+        if (cleaned !== raw) {
+          var pos = ct.selectionStart - (raw.length - cleaned.length);
+          ct.value = cleaned;
+          try { ct.setSelectionRange(pos, pos); } catch (e) {}
+        }
+        state.payment.tendered = cleaned;
+        var t = cleaned === "" ? null : Number(cleaned);
+        var change = (t != null && !isNaN(t)) ? t - subtotal : null;
+        var changeEl = document.querySelector(".cash-row .change");
+        if (changeEl) {
+          changeEl.textContent = change == null ? "—" : money(Math.max(0, change));
+          changeEl.className = "val change " + (change == null ? "" : (change >= 0 ? "pos" : "neg"));
+        }
+        var btn = document.getElementById("completeSaleBtn");
+        if (btn) {
+          var ok = state.cart.length > 0 && t != null && !isNaN(t) && t >= subtotal;
+          btn.disabled = !ok;
+          btn.textContent = "Complete Sale · " + money(subtotal);
+        }
       });
     }
   }
