@@ -160,6 +160,12 @@
     padding:2px 7px; border-radius:20px; text-transform:uppercase; letter-spacing:.05em; }
   .badge.out { background:#d06a5a22; color:var(--bad); }
   .psku { font-size:12px; color:var(--muted); font-family:'Spline Sans Mono',monospace; }
+  .pcat { font-size:11px; color:var(--muted); margin-top:4px; display:inline-flex;
+    align-items:center; gap:4px; padding:2px 7px; border-radius:5px;
+    background:var(--panel2); cursor:pointer; user-select:none;
+    transition:background .15s ease, color .15s ease; max-width:fit-content; }
+  .pcat:hover { background:var(--accentDim); color:var(--accent); }
+  .pcat .pcat-ico { font-size:10px; opacity:.7; }
   .qty { display:flex; align-items:center; gap:6px; }
   .qbtn { width:26px; height:26px; border-radius:6px; background:var(--panel);
     border:1px solid var(--line); color:var(--text); font-size:16px; line-height:1;
@@ -353,16 +359,47 @@
     box-shadow:0 8px 24px #0008; opacity:0; transition:opacity .2s ease; max-width:90vw; }
   #toast.show { opacity:1; }
 
-  /* ---- print ---- */
+  /* ---- print: 58mm thermal receipt ---- */
+  @page { size: 58mm auto; margin: 0; }
   @media print {
-    body { background:white; color:black; padding:0; }
-    body * { visibility:hidden; }
-    .overlay, .overlay * { visibility:visible; }
-    .overlay { position:static; background:white; padding:0; }
-    .modal { box-shadow:none; border:none; max-width:none; background:white; color:black; }
-    .mhead .x, .receipt-actions { display:none; }
-    .receipt-items, .receipt-totals { background:#f5f5f5; }
+    html, body { width: 58mm; background:white; color:black; padding:0; margin:0; }
+    body * { visibility: hidden; }
+    #thermalReceipt, #thermalReceipt * { visibility: visible; }
+    #thermalReceipt {
+      position: absolute; left: 0; top: 0; width: 58mm;
+      padding: 2mm 2mm 6mm; color: black; background: white;
+      font-family: 'Spline Sans Mono', 'Courier New', monospace;
+      font-size: 10pt; line-height: 1.35;
+    }
+    #thermalReceipt .tr-center { text-align: center; }
+    #thermalReceipt .tr-bold { font-weight: 700; }
+    #thermalReceipt .tr-big { font-size: 12pt; font-weight: 700; }
+    #thermalReceipt .tr-sep { border: 0; border-top: 1px dashed #000; margin: 3px 0; }
+    #thermalReceipt .tr-row { display: flex; justify-content: space-between; gap: 4mm; }
+    #thermalReceipt .tr-item-name { flex: 1; word-break: break-word; }
+    #thermalReceipt .tr-item-qty { font-size: 9pt; }
+    #thermalReceipt .tr-mt { margin-top: 4px; }
+    .overlay, .modal { box-shadow: none !important; }
   }
+  /* keep the thermal receipt off-screen except when printing */
+  #thermalReceipt { position: absolute; left: -10000px; top: 0; visibility: hidden; }
+
+  /* ---- scanner indicator ---- */
+  .scanner-dot {
+    display:inline-flex; align-items:center; gap:6px; font-size:11px;
+    color:var(--muted); margin-left:8px;
+  }
+  .scanner-dot .sd { width:7px; height:7px; border-radius:50%; background:var(--muted); }
+  .scanner-dot.active .sd { background:var(--good); animation:scannerPulse 1.2s ease-in-out infinite; }
+  @keyframes scannerPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .scanner-flash {
+    position:fixed; top:14px; left:50%; transform:translateX(-50%);
+    background:var(--good); color:#1a1714; padding:7px 14px; border-radius:8px;
+    font-size:13px; font-weight:700; z-index:70; opacity:0;
+    transition:opacity .15s ease; pointer-events:none;
+  }
+  .scanner-flash.show { opacity:1; }
+  .scanner-flash.miss { background:var(--bad); color:white; }
 </style>
 </head>
 <body>
@@ -423,7 +460,14 @@
     </div>
     <div class="toolbtns">
       <span class="useremail" id="userEmail"></span>
+      <span class="scanner-dot" id="scannerDot" title="Barcode scanner — last scan or idle">
+        <span class="sd"></span><span id="scannerLabel">Scanner ready</span>
+      </span>
       <button class="toolbtn hidden" id="installBtn">⬇ Install</button>
+      <button class="toolbtn" id="heldBtn" style="position:relative">⏸ Held
+        <span id="heldCount" class="hidden" style="position:absolute;top:-6px;right:-6px;background:var(--warn);color:#1a1714;font-size:10px;font-weight:800;border-radius:10px;padding:1px 6px;min-width:18px;text-align:center">0</span>
+      </button>
+      <button class="toolbtn" id="settingsBtn">⚙ Settings</button>
       <button class="toolbtn" id="salesBtn">🧾 Sales</button>
       <button class="toolbtn" id="dashboardBtn">📊 Dashboard</button>
       <button class="toolbtn" id="historyBtn">🕓 History</button>
@@ -456,7 +500,10 @@
       <div class="pos-cart">
         <div class="cart-head">
           <span class="ct" id="cartTitle">Cart</span>
-          <button class="cart-clear hidden" id="cartClearBtn">Clear cart</button>
+          <div style="display:flex;gap:10px;align-items:center">
+            <button class="cart-clear hidden" id="cartHoldBtn">⏸ Hold</button>
+            <button class="cart-clear hidden" id="cartClearBtn">Clear</button>
+          </div>
         </div>
         <div id="cartContent"></div>
       </div>
@@ -528,6 +575,18 @@
   </div>
 </div>
 
+<!-- Held sales modal -->
+<div class="overlay hidden" id="heldOverlay">
+  <div class="modal wide">
+    <div class="mhead">
+      <span style="color:var(--warn);font-size:18px;">⏸</span>
+      <span class="mtitle">Held Sales</span>
+      <span class="x" id="heldClose">✕</span>
+    </div>
+    <div class="mbody" id="heldBody"></div>
+  </div>
+</div>
+
 <!-- Sales list modal -->
 <div class="overlay hidden" id="salesOverlay">
   <div class="modal wide">
@@ -552,7 +611,63 @@
   </div>
 </div>
 
+<!-- Settings modal -->
+<div class="overlay hidden" id="settingsOverlay">
+  <div class="modal">
+    <div class="mhead">
+      <span style="color:var(--accent);font-size:18px;">⚙</span>
+      <span class="mtitle">Shop &amp; Receipt Settings</span>
+      <span class="x" id="settingsClose">✕</span>
+    </div>
+    <div class="mbody padded" id="settingsBody">
+      <div class="field-label">Shop name (top of receipt)</div>
+      <input style="width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--text);font-size:14px;font-family:inherit;margin-bottom:6px" id="setShopName" placeholder="e.g. Vantex Mart" />
+
+      <div class="field-label">Address line 1</div>
+      <input style="width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--text);font-size:14px;font-family:inherit;margin-bottom:6px" id="setAddr1" placeholder="Street, Barangay" />
+
+      <div class="field-label">Address line 2 (optional)</div>
+      <input style="width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--text);font-size:14px;font-family:inherit;margin-bottom:6px" id="setAddr2" placeholder="City, Province" />
+
+      <div class="field-label">TIN / Business reg. (optional)</div>
+      <input style="width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--text);font-size:14px;font-family:inherit;margin-bottom:6px" id="setTin" placeholder="000-000-000-000" />
+
+      <div class="field-label">Receipt footer (optional)</div>
+      <input style="width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--text);font-size:14px;font-family:inherit;margin-bottom:6px" id="setFooter" placeholder="e.g. Thank you, come again!" />
+
+      <div style="margin:14px 0 0;display:flex;align-items:center;gap:10px">
+        <input type="checkbox" id="setAutoPrint" style="width:auto" />
+        <label for="setAutoPrint" style="font-size:13px;cursor:pointer">
+          Auto-print thermal receipt after each sale
+        </label>
+      </div>
+
+      <div style="margin:8px 0 0;display:flex;align-items:center;gap:10px">
+        <input type="checkbox" id="setOpenDrawer" style="width:auto" />
+        <label for="setOpenDrawer" style="font-size:13px;cursor:pointer">
+          Print drawer-kick line (for printers with cash drawer)
+        </label>
+      </div>
+
+      <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="toolbtn" id="settingsTestPrint">🖨 Test receipt</button>
+        <button class="toolbtn" style="background:var(--accent);color:#1a1714;border-color:var(--accent)" id="settingsSave">Save settings</button>
+      </div>
+
+      <p style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.55">
+        <strong>Printer setup (one-time):</strong> set your Xprinter JP-58H as the default
+        printer in Chrome. In Chrome, open <code>chrome://settings/?search=printer</code>,
+        choose the Xprinter under "Default printer". To skip the print dialog every sale,
+        also enable <em>kiosk printing</em> (Chrome flag) or just keep "Auto-print" on and
+        confirm once — most thermal printers print instantly without a paper-size prompt.
+      </p>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
+<div id="scannerFlash" class="scanner-flash"></div>
+<div id="thermalReceipt"></div>
 
 <script>
 (function () {
@@ -578,7 +693,19 @@
     products: [], history: [], collapsed: {}, query: "", posQuery: "",
     editingId: null, dashboardPeriod: "this-month",
     view: localStorage.getItem("inv.view") || "pos",
-    cart: [], payment: { method: "cash", tendered: "" },
+    // POS cart
+    cart: [],
+    saleDiscount: 0,       // whole-sale discount amount
+    saleDiscountNote: "",
+    // payment composition
+    payments: [],          // committed payments: [{id, method, amount, tendered?, reference?}]
+    activePayMethod: "cash",
+    payTendered: "",       // string in the cash-tender input
+    payReference: "",      // string in the GCash/Maya reference input
+    // held sales
+    held: [],
+    heldId: null,          // id of held sale currently being edited, if any
+    // sales
     sales: [], salesLoaded: false
   };
 
@@ -652,17 +779,20 @@
     var pRes = await sb.from("products").select("*").order("created_at", { ascending: false });
     var hRes = await sb.from("history").select("*")
       .order("created_at", { ascending: false }).limit(HISTORY_CAP);
+    var heldRes = await sb.from("held_sales").select("*").order("created_at", { ascending: false });
     if (pRes.error || hRes.error) {
       setSync("off"); toast("Couldn't load data — check your connection."); return;
     }
     state.products = (pRes.data || []).map(fromRow);
     state.history = (hRes.data || []).map(fromHistoryRow);
+    state.held = heldRes.error ? [] : (heldRes.data || []);
+    renderHeldBadge();
     setSync("ok");
     render();
   }
 
   async function loadSales() {
-    var res = await sb.from("sales").select("*, sale_items(*)")
+    var res = await sb.from("sales").select("*, sale_items(*), payments(*)")
       .order("created_at", { ascending: false }).limit(50);
     if (res.error) { toast("Couldn't load sales."); return; }
     state.sales = res.data || [];
@@ -753,13 +883,16 @@
     var qty = Number(document.getElementById("edit_qty_" + id).value);
     var price = Number(document.getElementById("edit_price_" + id).value);
     var cost = Number(document.getElementById("edit_cost_" + id).value);
+    var catEl = document.getElementById("edit_cat_" + id);
+    var category = catEl ? (catEl.value.trim() || "Uncategorized") : p.category;
     if (isNaN(qty) || qty < 0 || isNaN(price) || price < 0 || isNaN(cost) || cost < 0) {
       alert("Quantity, price and cost must be valid numbers."); return;
     }
-    var oldQty = p.quantity, oldPrice = p.price, oldCost = p.cost;
+    var oldQty = p.quantity, oldPrice = p.price, oldCost = p.cost, oldCat = p.category;
     setSync("busy");
     var res = await sb.from("products")
-      .update({ quantity: qty, price: price, cost_price: cost }).eq("id", id);
+      .update({ quantity: qty, price: price, cost_price: cost, category: category })
+      .eq("id", id);
     if (res.error) { setSync("off"); toast("Couldn't save changes."); return; }
     if (qty !== oldQty)
       await logEntry({ type: "adjust", name: p.name,
@@ -771,16 +904,77 @@
     if (cost !== oldCost)
       await logEntry({ type: "edit", name: p.name,
         detail: "Cost " + money(oldCost) + " \u2192 " + money(cost) });
+    if (category !== oldCat)
+      await logEntry({ type: "edit", name: p.name,
+        detail: "Category " + oldCat + " \u2192 " + category });
     state.editingId = null;
     setSync("ok");
     await loadAll();
   }
 
-  /* ---------- POS cart ---------- */
-  function cartQty(productId) {
+  /* Single-purpose helper for category changes outside the pencil-edit flow.
+     Used by the inline category click and the bulk-move action. */
+  async function changeCategory(id, newCategory) {
+    var p = findProduct(id);
+    if (!p) return false;
+    newCategory = (newCategory || "").trim() || "Uncategorized";
+    if (newCategory === p.category) return false;
+    var oldCat = p.category;
+    setSync("busy");
+    var res = await sb.from("products").update({ category: newCategory }).eq("id", id);
+    if (res.error) { setSync("off"); toast("Couldn't update category."); return false; }
+    await logEntry({ type: "edit", name: p.name,
+      detail: "Category " + oldCat + " \u2192 " + newCategory });
+    setSync("ok");
+    return true;
+  }
+
+  function promptChangeCategory(id) {
+    var p = findProduct(id);
+    if (!p) return;
+    // gather distinct existing categories to make picking easier
+    var existing = {};
+    state.products.forEach(function (x) { if (x.category) existing[x.category] = true; });
+    var list = Object.keys(existing).sort();
+    var hint = list.length
+      ? "\n\nExisting categories:\n  " + list.join("\n  ")
+      : "";
+    var next = prompt(
+      'Move "' + p.name + '" to which category?' + hint,
+      p.category || ""
+    );
+    if (next === null) return;
+    (async function () {
+      var ok = await changeCategory(id, next);
+      if (ok) {
+        await loadAll();
+        toast('Moved to "' + (next.trim() || "Uncategorized") + '"');
+      }
+    })();
+  }
+
+  /* ---------- POS cart ----------
+     Each cart line has its own lineId so identical custom items don't collide.
+     Regular product lines find each other by productId; custom items always
+     get a new line. */
+  function newLineId() {
+    return "L" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+  function cartLineFor(productId) {
     var line = null;
-    state.cart.forEach(function (c) { if (c.productId === productId) line = c; });
+    state.cart.forEach(function (c) {
+      if (!c.isCustom && c.productId === productId) line = c;
+    });
+    return line;
+  }
+  function cartQty(productId) {
+    var line = cartLineFor(productId);
     return line ? line.quantity : 0;
+  }
+  function findCartLine(lineId) {
+    for (var i = 0; i < state.cart.length; i++)
+      if (state.cart[i].lineId === lineId) return state.cart[i];
+    return null;
   }
   function addToCart(productId) {
     var p = findProduct(productId);
@@ -790,67 +984,123 @@
       toast(p.name + " — no more stock available");
       return;
     }
-    if (current === 0) {
+    var line = cartLineFor(productId);
+    if (!line) {
       state.cart.push({
-        productId: p.id, name: p.name, sku: p.sku,
-        quantity: 1, unitPrice: p.price, unitCost: p.cost
+        lineId: newLineId(), productId: p.id, name: p.name, sku: p.sku,
+        quantity: 1, unitPrice: p.price, unitCost: p.cost,
+        lineDiscount: 0, isCustom: false
       });
     } else {
-      state.cart.forEach(function (c) { if (c.productId === productId) c.quantity += 1; });
+      line.quantity += 1;
     }
     renderPOS();
   }
-  function cartChange(productId, delta) {
-    var p = findProduct(productId);
-    state.cart.forEach(function (c) {
-      if (c.productId === productId) {
-        var next = c.quantity + delta;
-        if (next <= 0) { c._remove = true; return; }
-        if (p && next > p.quantity) {
-          toast("Only " + p.quantity + " in stock");
-          return;
-        }
-        c.quantity = next;
-      }
+  function addCustomToCart(name, price) {
+    state.cart.push({
+      lineId: newLineId(), productId: null, name: name, sku: "",
+      quantity: 1, unitPrice: price, unitCost: 0,
+      lineDiscount: 0, isCustom: true
     });
-    state.cart = state.cart.filter(function (c) { return !c._remove; });
     renderPOS();
   }
-  function cartRemove(productId) {
-    state.cart = state.cart.filter(function (c) { return c.productId !== productId; });
+  function lineChange(lineId, delta) {
+    var line = findCartLine(lineId);
+    if (!line) return;
+    var next = line.quantity + delta;
+    if (next <= 0) {
+      state.cart = state.cart.filter(function (c) { return c.lineId !== lineId; });
+      renderPOS();
+      return;
+    }
+    if (!line.isCustom) {
+      var p = findProduct(line.productId);
+      if (p && next > p.quantity) {
+        toast("Only " + p.quantity + " in stock");
+        return;
+      }
+    }
+    line.quantity = next;
+    renderPOS();
+  }
+  function lineRemove(lineId) {
+    state.cart = state.cart.filter(function (c) { return c.lineId !== lineId; });
+    renderPOS();
+  }
+  function lineSetDiscount(lineId, amount) {
+    var line = findCartLine(lineId);
+    if (!line) return;
+    var max = line.quantity * line.unitPrice;
+    line.lineDiscount = Math.max(0, Math.min(amount, max));
     renderPOS();
   }
   function clearCart() {
     state.cart = [];
-    state.payment = { method: "cash", tendered: "" };
+    state.saleDiscount = 0;
+    state.saleDiscountNote = "";
+    state.payments = [];
+    state.activePayMethod = "cash";
+    state.payTendered = "";
+    state.heldId = null;
     renderPOS();
+  }
+
+  function cartLineTotal(line) {
+    return Math.max(0, line.quantity * line.unitPrice - (line.lineDiscount || 0));
+  }
+  function cartSubtotal() {
+    return state.cart.reduce(function (s, l) { return s + cartLineTotal(l); }, 0);
+  }
+  function cartTotal() {
+    return Math.max(0, cartSubtotal() - (state.saleDiscount || 0));
+  }
+  function paymentsTotal() {
+    return state.payments.reduce(function (s, p) { return s + p.amount; }, 0);
+  }
+  function amountRemaining() {
+    return Math.max(0, cartTotal() - paymentsTotal());
   }
 
   async function completeSale() {
     if (state.cart.length === 0) return;
-    var subtotal = state.cart.reduce(function (s, c) { return s + c.quantity * c.unitPrice; }, 0);
-    var tendered = state.payment.method === "cash"
-      ? (state.payment.tendered === "" ? null : Number(state.payment.tendered))
-      : null;
-    if (state.payment.method === "cash") {
-      if (tendered === null || isNaN(tendered)) { toast("Enter cash amount tendered"); return; }
-      if (tendered < subtotal) { toast("Cash tendered is less than total"); return; }
-    }
-    var items = state.cart.map(function (c) {
+    var total = cartTotal();
+    var paid = paymentsTotal();
+    if (paid + 0.005 < total) { toast("Payments don't cover the total yet"); return; }
+
+    var items = state.cart.map(function (l) {
       return {
-        product_id: c.productId,
-        quantity: c.quantity,
-        unit_price: c.unitPrice,
-        unit_cost: c.unitCost,
-        line_total: +(c.quantity * c.unitPrice).toFixed(2)
+        product_id: l.isCustom ? null : l.productId,
+        name: l.name,
+        sku: l.sku || "",
+        quantity: l.quantity,
+        unit_price: l.unitPrice,
+        unit_cost: l.unitCost || 0,
+        line_discount: +(l.lineDiscount || 0).toFixed(2),
+        line_total: +cartLineTotal(l).toFixed(2),
+        is_custom: !!l.isCustom
       };
     });
+
+    // build payment objects: amount, plus tendered/change for cash
+    var payments = state.payments.map(function (p) {
+      var obj = { method: p.method, amount: +p.amount.toFixed(2) };
+      if (p.method === "cash" && p.tendered != null) {
+        obj.tendered = +p.tendered.toFixed(2);
+        obj.change = +Math.max(0, p.tendered - p.amount).toFixed(2);
+      }
+      if (p.reference) obj.reference = p.reference;
+      return obj;
+    });
+
     setSync("busy");
     var btn = document.getElementById("completeSaleBtn");
     if (btn) btn.disabled = true;
     var res = await sb.rpc("record_sale", {
-      p_items: items, p_payment: state.payment.method,
-      p_tendered: tendered, p_note: ""
+      p_items: items,
+      p_payments: payments,
+      p_discount: +(state.saleDiscount || 0).toFixed(2),
+      p_discount_note: state.saleDiscountNote || "",
+      p_note: ""
     });
     if (btn) btn.disabled = false;
     if (res.error) {
@@ -858,21 +1108,163 @@
       toast("Sale failed: " + res.error.message);
       return;
     }
-    // build receipt locally from cart (before clearing)
+
+    // If this was a held sale, delete the held record now that we sold it
+    if (state.heldId) {
+      try { await sb.from("held_sales").delete().eq("id", state.heldId); } catch (e) {}
+    }
+
+    // Build receipt locally from cart (before clearing)
+    var firstCashPay = state.payments.filter(function (p) { return p.method === "cash"; })[0];
     var receipt = {
       id: res.data,
-      items: state.cart.slice(),
-      total: subtotal,
-      payment: state.payment.method,
-      tendered: tendered,
-      change: tendered != null ? Math.max(0, tendered - subtotal) : 0,
+      items: state.cart.map(function (l) {
+        return {
+          name: l.name, quantity: l.quantity,
+          unitPrice: l.unitPrice, unitCost: l.unitCost,
+          lineDiscount: l.lineDiscount || 0,
+          lineTotal: cartLineTotal(l)
+        };
+      }),
+      subtotal: cartSubtotal(),
+      discount: state.saleDiscount || 0,
+      discountNote: state.saleDiscountNote || "",
+      total: total,
+      payments: state.payments.slice(),
+      tendered: firstCashPay ? firstCashPay.tendered : null,
+      change: firstCashPay && firstCashPay.tendered != null
+        ? Math.max(0, firstCashPay.tendered - firstCashPay.amount) : 0,
       timestamp: new Date()
     };
+
     clearCart();
     setSync("ok");
     await loadAll();
     if (state.salesLoaded) await loadSales();
     showReceipt(receipt);
+    if (settings.autoPrint) {
+      setTimeout(function () { printReceipt(receipt); }, 200);
+    }
+  }
+
+  /* ---------- held sales ---------- */
+  async function holdSale() {
+    if (state.cart.length === 0) return;
+    var label = prompt("Label this held sale (optional):", "") || "";
+    setSync("busy");
+    var payload = {
+      user_id: user.id,
+      label: label,
+      cart: state.cart,
+      discount: state.saleDiscount || 0,
+      discount_note: state.saleDiscountNote || "",
+      item_count: state.cart.reduce(function (s, l) { return s + l.quantity; }, 0),
+      subtotal: cartSubtotal()
+    };
+    var res = state.heldId
+      ? await sb.from("held_sales").update(payload).eq("id", state.heldId)
+      : await sb.from("held_sales").insert(payload);
+    if (res.error) { setSync("off"); toast("Couldn't hold sale: " + res.error.message); return; }
+    setSync("ok");
+    clearCart();
+    toast(label ? 'Held: "' + label + '"' : "Sale held");
+    await loadHeld();
+  }
+  async function loadHeld() {
+    var res = await sb.from("held_sales").select("*").order("created_at", { ascending: false });
+    if (res.error) return;
+    state.held = res.data || [];
+    renderHeldBadge();
+  }
+  function renderHeldBadge() {
+    var el = document.getElementById("heldCount");
+    if (!el) return;
+    if (state.held.length === 0) {
+      el.classList.add("hidden");
+    } else {
+      el.classList.remove("hidden");
+      el.textContent = String(state.held.length);
+    }
+  }
+  function resumeHeld(heldId) {
+    var h = state.held.find(function (x) { return x.id === heldId; });
+    if (!h) return;
+    if (state.cart.length > 0 &&
+        !confirm("Replace the current cart with the held sale?")) return;
+    // re-validate stock — if anything's now short, warn but still load
+    var warnings = [];
+    (h.cart || []).forEach(function (l) {
+      if (l.isCustom) return;
+      var p = findProduct(l.productId);
+      if (!p) warnings.push(l.name + ' — product was deleted, will be removed');
+      else if (p.quantity < l.quantity) warnings.push(l.name + ' — only ' + p.quantity + ' left (was ' + l.quantity + ')');
+    });
+    if (warnings.length) toast(warnings[0]);
+    // load the cart, dropping deleted-product lines and clamping over-quantity ones
+    state.cart = (h.cart || []).filter(function (l) {
+      if (l.isCustom) return true;
+      var p = findProduct(l.productId);
+      if (!p) return false;
+      if (p.quantity < l.quantity) l.quantity = p.quantity;
+      return l.quantity > 0;
+    });
+    // assign fresh lineIds if missing (older holds)
+    state.cart.forEach(function (l) { if (!l.lineId) l.lineId = newLineId(); });
+    state.saleDiscount = Number(h.discount) || 0;
+    state.saleDiscountNote = h.discount_note || "";
+    state.payments = [];
+    state.activePayMethod = "cash";
+    state.payTendered = "";
+    state.heldId = h.id;
+    document.getElementById("heldOverlay").classList.add("hidden");
+    renderPOS();
+  }
+  async function deleteHeld(heldId) {
+    if (!confirm("Delete this held sale?")) return;
+    setSync("busy");
+    var res = await sb.from("held_sales").delete().eq("id", heldId);
+    if (res.error) { setSync("off"); toast("Couldn't delete"); return; }
+    setSync("ok");
+    await loadHeld();
+    renderHeldList();
+  }
+
+  function renderHeldList() {
+    var b = document.getElementById("heldBody");
+    if (state.held.length === 0) {
+      b.innerHTML = '<div class="empty" style="padding:40px"><div>No held sales.</div></div>';
+      return;
+    }
+    b.innerHTML = state.held.map(function (h) {
+      var items = (h.cart || []);
+      var preview = items.slice(0, 3).map(function (l) { return l.name + " ×" + l.quantity; }).join(", ");
+      if (items.length > 3) preview += " +" + (items.length - 3) + " more";
+      return '<div class="sales-row" data-held-id="' + h.id + '">' +
+        '<div class="si" style="background:var(--warnDim);color:var(--warn)">⏸</div>' +
+        '<div><div class="sn">' + esc(h.label || "Held sale") + '</div>' +
+        '<div class="sm">' + esc(preview || "(empty)") + '</div></div>' +
+        '<div class="sd">' + fmtDate(h.created_at) + '</div>' +
+        '<div class="st">' + money(h.subtotal - (h.discount || 0)) + '</div>' +
+        '<button class="ibtn" style="color:var(--bad)" data-held-delete="' + h.id + '" title="Delete">🗑</button>' +
+        '</div>';
+    }).join("");
+  }
+
+  /* ---------- payments (split-tender) ---------- */
+  function addPayment(method, amount, tendered, reference) {
+    state.payments.push({
+      id: newLineId(),
+      method: method,
+      amount: Math.max(0, +Number(amount).toFixed(2)),
+      tendered: tendered != null ? Number(tendered) : null,
+      reference: reference || ""
+    });
+    state.payTendered = "";
+    renderCart();
+  }
+  function removePayment(payId) {
+    state.payments = state.payments.filter(function (p) { return p.id !== payId; });
+    renderCart();
   }
 
   /* ---------- CSV ---------- */
@@ -1038,7 +1430,12 @@
           html += '<div class="prow">';
           html += '<div><div class="pname">' + esc(p.name) +
             (lowItem ? '<span class="badge">Low</span>' : '') + '</div>' +
-            (p.sku ? '<div class="psku">' + esc(p.sku) + '</div>' : '') + '</div>';
+            (p.sku ? '<div class="psku">' + esc(p.sku) + '</div>' : '') +
+            '<div class="pcat" data-act="changecat" data-id="' + p.id +
+              '" title="Click to change category">' +
+              '<span class="pcat-ico">📁</span> ' + esc(p.category) +
+            '</div>' +
+            '</div>';
           if (editing) {
             html += '<div class="editstack"><input class="editinput" type="number" min="0" id="edit_qty_' +
               p.id + '" value="' + p.quantity + '" /></div>';
@@ -1054,7 +1451,10 @@
               '<input class="editinput" type="number" min="0" step="0.01" id="edit_price_' + p.id +
               '" value="' + p.price + '" /><span class="editlabel">Cost</span>' +
               '<input class="editinput" type="number" min="0" step="0.01" id="edit_cost_' + p.id +
-              '" value="' + p.cost + '" /></div>';
+              '" value="' + p.cost + '" />' +
+              '<span class="editlabel">Category</span>' +
+              '<input class="editinput" type="text" id="edit_cat_' + p.id +
+              '" value="' + esc(p.category) + '" list="categoryList" /></div>';
           } else {
             html += '<div><div class="price-main">' + money(p.price) + '</div>' +
               '<div class="price-sub">cost ' + money(p.cost) + '</div></div>';
@@ -1075,6 +1475,13 @@
         });
       }
     });
+    // shared datalist for category autocomplete (used by edit input)
+    var distinct = {};
+    state.products.forEach(function (x) { if (x.category) distinct[x.category] = true; });
+    var optionsHtml = Object.keys(distinct).sort().map(function (c) {
+      return '<option value="' + esc(c) + '"></option>';
+    }).join("");
+    html += '<datalist id="categoryList">' + optionsHtml + '</datalist>';
     body.innerHTML = html;
   }
 
@@ -1113,104 +1520,308 @@
   function renderCart() {
     var c = document.getElementById("cartContent");
     var clearBtn = document.getElementById("cartClearBtn");
+    var holdBtn = document.getElementById("cartHoldBtn");
     var title = document.getElementById("cartTitle");
+
     if (state.cart.length === 0) {
-      c.innerHTML = '<div class="cart-empty">Tap a product to add it to the cart.</div>';
+      c.innerHTML = '<div class="cart-empty">Tap a product to add it to the cart, or use <strong>Custom item</strong> below for one-offs.</div>' +
+        '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">' +
+        '<button class="toolbtn" id="addCustomBtn">+ Custom item</button>' +
+        '</div>';
+      var ac = document.getElementById("addCustomBtn");
+      if (ac) ac.addEventListener("click", promptCustomItem);
       clearBtn.classList.add("hidden");
-      title.textContent = "Cart";
+      if (holdBtn) holdBtn.classList.add("hidden");
+      title.textContent = state.heldId ? "Cart · resumed" : "Cart";
       return;
     }
-    clearBtn.classList.remove("hidden");
-    var itemCount = state.cart.reduce(function (s, x) { return s + x.quantity; }, 0);
-    title.textContent = "Cart · " + itemCount + (itemCount === 1 ? " item" : " items");
 
-    var subtotal = state.cart.reduce(function (s, c) { return s + c.quantity * c.unitPrice; }, 0);
+    clearBtn.classList.remove("hidden");
+    if (holdBtn) holdBtn.classList.remove("hidden");
+    var itemCount = state.cart.reduce(function (s, x) { return s + x.quantity; }, 0);
+    title.textContent = (state.heldId ? "Resumed sale · " : "Cart · ") +
+      itemCount + (itemCount === 1 ? " item" : " items");
+
+    var subtotal = cartSubtotal();
+    var total = cartTotal();
+    var paid = paymentsTotal();
+    var remaining = Math.max(0, total - paid);
+    var saleDiscount = Number(state.saleDiscount) || 0;
+
+    // ---- cart lines ----
     var html = '<div class="cart-items">' + state.cart.map(function (line) {
-      return '<div class="cart-line">' +
-        '<div><div class="cn">' + esc(line.name) + '</div>' +
-        '<div class="cp">' + money(line.unitPrice) + '</div></div>' +
+      var lineTotal = cartLineTotal(line);
+      var basePart = line.quantity + " × " + money(line.unitPrice);
+      var discPart = line.lineDiscount > 0
+        ? ' <span style="color:var(--warn)">– ' + money(line.lineDiscount) + '</span>'
+        : '';
+      var customBadge = line.isCustom
+        ? '<span class="badge" style="background:var(--accentDim);color:var(--accent);margin-left:6px">Custom</span>'
+        : '';
+      return '<div class="cart-line" data-lid="' + line.lineId + '">' +
+        '<div><div class="cn">' + esc(line.name) + customBadge + '</div>' +
+        '<div class="cp">' + basePart + discPart + '</div></div>' +
         '<div class="qty">' +
-          '<button class="qbtn" data-cact="dec" data-pid="' + line.productId + '">\u2013</button>' +
+          '<button class="qbtn" data-cact="dec" data-lid="' + line.lineId + '">\u2013</button>' +
           '<span class="qnum">' + line.quantity + '</span>' +
-          '<button class="qbtn" data-cact="inc" data-pid="' + line.productId + '">+</button>' +
+          '<button class="qbtn" data-cact="inc" data-lid="' + line.lineId + '">+</button>' +
         '</div>' +
-        '<span class="ct">' + money(line.quantity * line.unitPrice) + '</span>' +
-        '<button class="cx" data-cact="rm" data-pid="' + line.productId + '" title="Remove">✕</button>' +
+        '<span class="ct">' + money(lineTotal) + '</span>' +
+        '<button class="cx" data-cact="disc" data-lid="' + line.lineId + '" title="Line discount">%</button>' +
+        '<button class="cx" data-cact="rm" data-lid="' + line.lineId + '" title="Remove">✕</button>' +
         '</div>';
     }).join("") + '</div>';
 
-    html += '<div class="cart-totals">' +
-      '<div class="ct-row big"><span>Total</span><span class="val">' + money(subtotal) + '</span></div>' +
+    // ---- custom item + sale discount buttons ----
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-2px 0 10px">' +
+      '<button class="toolbtn" id="addCustomBtn" style="font-size:12px;padding:7px 11px">+ Custom item</button>' +
+      '<button class="toolbtn" id="saleDiscountBtn" style="font-size:12px;padding:7px 11px">' +
+        (saleDiscount > 0 ? '% Discount: ' + money(saleDiscount) : '% Sale discount') +
+      '</button>' +
       '</div>';
 
-    var methods = [
-      { id: "cash", label: "💵 Cash" }, { id: "gcash", label: "GCash" },
-      { id: "maya", label: "Maya" },    { id: "card", label: "Card" },
-      { id: "bank", label: "Bank Transfer" }, { id: "other", label: "Other" }
-    ];
-    html += '<div class="field-label">Payment method</div>';
-    html += '<div class="pay-methods">' + methods.map(function (m) {
-      return '<button class="pay-btn' + (state.payment.method === m.id ? " active" : "") +
-        '" data-pay="' + m.id + '">' + m.label + '</button>';
-    }).join("") + '</div>';
+    // ---- totals ----
+    html += '<div class="cart-totals">';
+    html += '<div class="ct-row"><span>Subtotal</span><span class="val">' + money(subtotal) + '</span></div>';
+    if (saleDiscount > 0) {
+      html += '<div class="ct-row" style="color:var(--warn)">' +
+        '<span>Discount' + (state.saleDiscountNote ? ' (' + esc(state.saleDiscountNote) + ')' : '') + '</span>' +
+        '<span class="val">– ' + money(saleDiscount) + '</span></div>';
+    }
+    html += '<div class="ct-row big"><span>Total</span><span class="val">' + money(total) + '</span></div>';
+    html += '</div>';
 
-    if (state.payment.method === "cash") {
-      var tendered = state.payment.tendered === "" ? null : Number(state.payment.tendered);
-      var change = (tendered != null && !isNaN(tendered)) ? tendered - subtotal : null;
-      html += '<div class="cash-row">' +
-        '<div><div class="lbl">Tendered</div>' +
-        '<input id="cashTendered" type="text" inputmode="decimal" autocomplete="off" ' +
-          'placeholder="0.00" value="' + (state.payment.tendered === "" ? "" : state.payment.tendered) + '" /></div>' +
-        '<div><div class="lbl">Change</div>' +
-        '<div class="val change ' + (change == null ? "" : (change >= 0 ? "pos" : "neg")) + '">' +
-          (change == null ? "—" : money(Math.max(0, change))) + '</div></div>' +
-        '</div>';
+    // ---- existing payment chips ----
+    if (state.payments.length > 0) {
+      html += '<div style="background:var(--panel2);border-radius:10px;padding:8px 10px;margin-bottom:10px">';
+      html += '<div class="field-label" style="margin:0 0 6px">Payments</div>';
+      state.payments.forEach(function (p) {
+        var ml = { cash:"💵 Cash", gcash:"GCash", maya:"Maya", card:"Card",
+                   bank:"Bank Transfer", other:"Other" }[p.method] || p.method;
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px">' +
+          '<span style="flex:1">' + ml + (p.reference ? ' · ' + esc(p.reference) : '') + '</span>' +
+          '<span class="mono">' + money(p.amount) + '</span>' +
+          '<button class="cx" data-pay-remove="' + p.id + '" title="Remove">✕</button>' +
+          '</div>';
+      });
+      html += '<div class="ct-row" style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--line)">' +
+        '<span>Paid so far</span><span class="val">' + money(paid) + '</span></div>';
+      if (remaining > 0) {
+        html += '<div class="ct-row" style="color:var(--warn)"><span>Remaining</span><span class="val">' + money(remaining) + '</span></div>';
+      }
+      html += '</div>';
     }
 
-    var canComplete = state.cart.length > 0 &&
-      (state.payment.method !== "cash" ||
-        (state.payment.tendered !== "" && Number(state.payment.tendered) >= subtotal));
+    // ---- add-payment block (shown only if remaining > 0) ----
+    if (remaining > 0) {
+      var methods = [
+        { id: "cash",  label: "💵 Cash" }, { id: "gcash", label: "GCash" },
+        { id: "maya",  label: "Maya" },    { id: "card",  label: "Card" },
+        { id: "bank",  label: "Bank Xfer" },{ id: "other", label: "Other" }
+      ];
+      html += '<div class="field-label">Add payment</div>';
+      html += '<div class="pay-methods">' + methods.map(function (m) {
+        return '<button class="pay-btn' + (state.activePayMethod === m.id ? " active" : "") +
+          '" data-pay="' + m.id + '">' + m.label + '</button>';
+      }).join("") + '</div>';
+
+      if (state.activePayMethod === "cash") {
+        var tendered = state.payTendered === "" ? null : Number(state.payTendered);
+        var change = (tendered != null && !isNaN(tendered)) ? tendered - remaining : null;
+        html += '<div class="cash-row">' +
+          '<div><div class="lbl">Tendered</div>' +
+          '<input id="cashTendered" type="text" inputmode="decimal" autocomplete="off" ' +
+            'placeholder="0.00" value="' + (state.payTendered === "" ? "" : state.payTendered) + '" /></div>' +
+          '<div><div class="lbl">Change</div>' +
+          '<div class="val change ' + (change == null ? "" : (change >= 0 ? "pos" : "neg")) + '">' +
+            (change == null ? "—" : money(Math.max(0, change))) + '</div></div>' +
+          '</div>';
+        // quick-tender buttons
+        html += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">';
+        var quickAmounts = [
+          { label: "Exact", value: remaining },
+          { label: "₱20",   value: 20 },
+          { label: "₱50",   value: 50 },
+          { label: "₱100",  value: 100 },
+          { label: "₱200",  value: 200 },
+          { label: "₱500",  value: 500 },
+          { label: "₱1000", value: 1000 }
+        ];
+        // pick the ones >= remaining (plus Exact), keep it tight
+        var picks = [quickAmounts[0]];
+        for (var qi = 1; qi < quickAmounts.length; qi++) {
+          if (quickAmounts[qi].value >= remaining || quickAmounts[qi].value >= 100) picks.push(quickAmounts[qi]);
+          if (picks.length >= 5) break;
+        }
+        picks.forEach(function (q) {
+          html += '<button class="toolbtn" data-quick="' + q.value + '" style="padding:8px 4px;font-size:12px">' + q.label + '</button>';
+        });
+        html += '</div>';
+      } else {
+        // for non-cash, just amount + optional reference
+        html += '<div class="cash-row">' +
+          '<div><div class="lbl">Amount</div>' +
+          '<input id="cashTendered" type="text" inputmode="decimal" autocomplete="off" ' +
+            'placeholder="' + money(remaining).replace(/[^0-9.]/g, "") + '" value="' + esc(state.payTendered || "") + '" /></div>' +
+          '<div><div class="lbl">Reference (optional)</div>' +
+          '<input id="payRef" type="text" autocomplete="off" placeholder="ref/txn no." value="' + esc(state.payReference || "") + '" /></div>' +
+          '</div>';
+      }
+
+      html += '<button class="toolbtn" id="addPaymentBtn" style="width:100%;margin-bottom:10px;background:var(--panel2)">+ Add this payment</button>';
+    }
+
+    // ---- complete button ----
+    var canComplete = state.cart.length > 0 && paid + 0.005 >= total;
     html += '<button class="complete-btn" id="completeSaleBtn"' + (canComplete ? "" : " disabled") +
-      '>Complete Sale · ' + money(subtotal) + '</button>';
+      '>Complete Sale · ' + money(total) + '</button>';
 
     c.innerHTML = html;
+    wireCartInputs(remaining);
+  }
 
-    // Live-update change & complete-button as the user types — without
-    // re-rendering the input itself, which would lose focus and scramble
-    // the entered text.
+  function wireCartInputs(remaining) {
+    var customBtn = document.getElementById("addCustomBtn");
+    if (customBtn) customBtn.addEventListener("click", promptCustomItem);
+
+    var sdBtn = document.getElementById("saleDiscountBtn");
+    if (sdBtn) sdBtn.addEventListener("click", promptSaleDiscount);
+
+    var addBtn = document.getElementById("addPaymentBtn");
+    if (addBtn) {
+      addBtn.addEventListener("click", function () {
+        var ct = document.getElementById("cashTendered");
+        var refEl = document.getElementById("payRef");
+        var rawAmount = ct ? ct.value : "";
+        if (rawAmount === "" && state.activePayMethod === "cash") {
+          // default to "remaining" for cash if blank
+          rawAmount = remaining.toFixed(2);
+        }
+        var amt = Number(rawAmount);
+        if (isNaN(amt) || amt <= 0) { toast("Enter a payment amount"); return; }
+
+        if (state.activePayMethod === "cash") {
+          // tendered may exceed remaining (change); amount applied = remaining
+          var applied = Math.min(amt, remaining);
+          var tendered = amt;
+          addPayment("cash", applied, tendered, "");
+        } else {
+          var applied2 = Math.min(amt, remaining);
+          addPayment(state.activePayMethod, applied2, null, refEl ? refEl.value.trim() : "");
+        }
+      });
+    }
+
+    // quick-tender buttons
+    document.querySelectorAll("[data-quick]").forEach(function (q) {
+      q.addEventListener("click", function () {
+        var v = Number(q.getAttribute("data-quick"));
+        state.payTendered = String(v);
+        renderCart();
+      });
+    });
+
+    // Live-update change for cash tendered input — patches the change cell
+    // in place, doesn't re-render (would lose focus / scramble typing).
     var ct = document.getElementById("cashTendered");
     if (ct) {
       ct.addEventListener("input", function () {
-        // strip anything that isn't a digit or a decimal point; allow only one dot
         var raw = ct.value;
         var cleaned = raw.replace(/[^0-9.]/g, "");
         var firstDot = cleaned.indexOf(".");
         if (firstDot >= 0) {
-          cleaned = cleaned.slice(0, firstDot + 1) +
-                    cleaned.slice(firstDot + 1).replace(/\./g, "");
+          cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
         }
         if (cleaned !== raw) {
           var pos = ct.selectionStart - (raw.length - cleaned.length);
           ct.value = cleaned;
           try { ct.setSelectionRange(pos, pos); } catch (e) {}
         }
-        state.payment.tendered = cleaned;
-        var t = cleaned === "" ? null : Number(cleaned);
-        var change = (t != null && !isNaN(t)) ? t - subtotal : null;
-        var changeEl = document.querySelector(".cash-row .change");
-        if (changeEl) {
-          changeEl.textContent = change == null ? "—" : money(Math.max(0, change));
-          changeEl.className = "val change " + (change == null ? "" : (change >= 0 ? "pos" : "neg"));
-        }
-        var btn = document.getElementById("completeSaleBtn");
-        if (btn) {
-          var ok = state.cart.length > 0 && t != null && !isNaN(t) && t >= subtotal;
-          btn.disabled = !ok;
-          btn.textContent = "Complete Sale · " + money(subtotal);
+        state.payTendered = cleaned;
+        if (state.activePayMethod === "cash") {
+          var t = cleaned === "" ? null : Number(cleaned);
+          var change = (t != null && !isNaN(t)) ? t - remaining : null;
+          var changeEl = document.querySelector(".cash-row .change");
+          if (changeEl) {
+            changeEl.textContent = change == null ? "—" : money(Math.max(0, change));
+            changeEl.className = "val change " + (change == null ? "" : (change >= 0 ? "pos" : "neg"));
+          }
         }
       });
     }
+    var refEl = document.getElementById("payRef");
+    if (refEl) {
+      refEl.addEventListener("input", function () { state.payReference = refEl.value; });
+    }
   }
+
+  function promptCustomItem() {
+    var name = prompt("Custom item name:", "");
+    if (!name || !name.trim()) return;
+    var priceStr = prompt("Price (₱):", "");
+    if (priceStr === null) return;
+    var price = Number(priceStr);
+    if (isNaN(price) || price < 0) { toast("Invalid price"); return; }
+    addCustomToCart(name.trim(), price);
+  }
+
+  function promptSaleDiscount() {
+    var current = state.saleDiscount || 0;
+    var subtotal = cartSubtotal();
+    var prompt1 = 'Discount amount in ₱ (or end with % for percent of subtotal).\n' +
+      'Subtotal: ' + money(subtotal) + '\n' +
+      (current > 0 ? 'Current: ' + money(current) + '\n' : '') +
+      'Enter 0 or leave blank to clear.';
+    var input = prompt(prompt1, current > 0 ? String(current) : "");
+    if (input === null) return;
+    input = input.trim();
+    if (input === "" || input === "0") {
+      state.saleDiscount = 0;
+      state.saleDiscountNote = "";
+      renderCart();
+      return;
+    }
+    var amount;
+    if (input.endsWith("%")) {
+      var pct = Number(input.slice(0, -1));
+      if (isNaN(pct) || pct < 0 || pct > 100) { toast("Invalid percent"); return; }
+      amount = +(subtotal * pct / 100).toFixed(2);
+    } else {
+      amount = Number(input);
+      if (isNaN(amount) || amount < 0) { toast("Invalid amount"); return; }
+    }
+    if (amount > subtotal) {
+      toast("Discount can't exceed subtotal"); return;
+    }
+    var note = prompt("Reason / label (optional, e.g. Senior, Promo):", state.saleDiscountNote || "") || "";
+    state.saleDiscount = amount;
+    state.saleDiscountNote = note.trim();
+    renderCart();
+  }
+
+  function promptLineDiscount(lineId) {
+    var line = findCartLine(lineId);
+    if (!line) return;
+    var max = line.quantity * line.unitPrice;
+    var input = prompt('Discount on this line (₱, or % for percent).\n' +
+      'Line total before discount: ' + money(max) + '\n' +
+      (line.lineDiscount > 0 ? 'Current: ' + money(line.lineDiscount) + '\n' : '') +
+      'Enter 0 or leave blank to clear.', line.lineDiscount > 0 ? String(line.lineDiscount) : "");
+    if (input === null) return;
+    input = input.trim();
+    if (input === "" || input === "0") { lineSetDiscount(lineId, 0); return; }
+    var amount;
+    if (input.endsWith("%")) {
+      var pct = Number(input.slice(0, -1));
+      if (isNaN(pct) || pct < 0 || pct > 100) { toast("Invalid percent"); return; }
+      amount = +(max * pct / 100).toFixed(2);
+    } else {
+      amount = Number(input);
+      if (isNaN(amount) || amount < 0) { toast("Invalid amount"); return; }
+    }
+    lineSetDiscount(lineId, amount);
+  }
+
   function renderPOS() { renderProductGrid(); renderCart(); }
 
   /* ---------- rendering: history ---------- */
@@ -1371,26 +1982,49 @@
   function showReceiptFromSale(saleId) {
     var s = state.sales.find(function (x) { return x.id === saleId; });
     if (!s) return;
+    var items = (s.sale_items || []).map(function (it) {
+      var unit = Number(it.unit_price);
+      var qty = it.quantity;
+      var ld = Number(it.line_discount || 0);
+      return {
+        name: it.name, quantity: qty,
+        unitPrice: unit, unitCost: Number(it.unit_cost),
+        lineDiscount: ld,
+        lineTotal: Number(it.line_total != null ? it.line_total : Math.max(0, qty * unit - ld))
+      };
+    });
+    var payments = (s.payments || []).map(function (p) {
+      return {
+        method: p.method, amount: Number(p.amount),
+        tendered: p.tendered != null ? Number(p.tendered) : null,
+        reference: p.reference || ""
+      };
+    });
+    var firstCash = payments.filter(function (p) { return p.method === "cash"; })[0];
     var receipt = {
-      id: s.id,
-      items: (s.sale_items || []).map(function (it) {
-        return {
-          name: it.name, quantity: it.quantity,
-          unitPrice: Number(it.unit_price), unitCost: Number(it.unit_cost)
-        };
-      }),
+      id: s.id, items: items,
+      subtotal: Number(s.subtotal != null ? s.subtotal : s.total),
+      discount: Number(s.discount || 0),
+      discountNote: s.discount_note || "",
       total: Number(s.total),
-      payment: s.payment,
-      tendered: s.tendered != null ? Number(s.tendered) : null,
-      change: s.change_amt != null ? Number(s.change_amt) : 0,
+      payments: payments.length ? payments : [{ method: s.payment, amount: Number(s.total) }],
+      tendered: firstCash && firstCash.tendered != null ? firstCash.tendered
+               : (s.tendered != null ? Number(s.tendered) : null),
+      change: firstCash && firstCash.tendered != null
+             ? Math.max(0, firstCash.tendered - firstCash.amount)
+             : (s.change_amt != null ? Number(s.change_amt) : 0),
       timestamp: new Date(s.created_at)
     };
     showReceipt(receipt);
   }
+
+  function methodLabel(m) {
+    return { cash: "Cash", gcash: "GCash", maya: "Maya", card: "Card",
+             bank: "Bank Transfer", other: "Other", split: "Split" }[m] || m;
+  }
+
   function showReceipt(r) {
     document.getElementById("receiptOverlay").classList.remove("hidden");
-    var label = { cash: "Cash", gcash: "GCash", maya: "Maya", card: "Card",
-                  bank: "Bank Transfer", other: "Other" }[r.payment] || r.payment;
     var html = '<div class="receipt-head">' +
       '<div class="check">✅</div>' +
       '<div class="ttl">Sale Complete</div>' +
@@ -1398,15 +2032,32 @@
       '<div class="sub">Ref: ' + esc(String(r.id).slice(0, 8).toUpperCase()) + '</div>' +
       '</div>';
     html += '<div class="receipt-items">' + r.items.map(function (it) {
+      var ld = it.lineDiscount || 0;
       return '<div class="receipt-line">' +
         '<div><div class="rn">' + esc(it.name) + '</div>' +
-        '<div class="rq">' + it.quantity + ' × ' + money(it.unitPrice) + '</div></div>' +
-        '<div class="rt">' + money(it.quantity * it.unitPrice) + '</div>' +
+        '<div class="rq">' + it.quantity + ' × ' + money(it.unitPrice) +
+        (ld > 0 ? ' <span style="color:var(--warn)">– ' + money(ld) + '</span>' : '') + '</div></div>' +
+        '<div class="rt">' + money(it.lineTotal != null ? it.lineTotal : it.quantity * it.unitPrice) + '</div>' +
         '</div>';
     }).join("") + '</div>';
-    html += '<div class="receipt-totals">' +
-      '<div class="ct-row big"><span>Total</span><span class="val">' + money(r.total) + '</span></div>' +
-      '<div class="ct-row"><span>Payment</span><span class="val">' + label + '</span></div>';
+
+    html += '<div class="receipt-totals">';
+    if (r.subtotal != null && (r.discount > 0 || r.subtotal !== r.total)) {
+      html += '<div class="ct-row"><span>Subtotal</span><span class="val">' + money(r.subtotal) + '</span></div>';
+    }
+    if (r.discount > 0) {
+      html += '<div class="ct-row" style="color:var(--warn)"><span>Discount' +
+        (r.discountNote ? ' (' + esc(r.discountNote) + ')' : '') +
+        '</span><span class="val">– ' + money(r.discount) + '</span></div>';
+    }
+    html += '<div class="ct-row big"><span>Total</span><span class="val">' + money(r.total) + '</span></div>';
+    if (r.payments && r.payments.length) {
+      r.payments.forEach(function (p) {
+        html += '<div class="ct-row"><span>' + methodLabel(p.method) +
+          (p.reference ? ' (' + esc(p.reference) + ')' : '') +
+          '</span><span class="val">' + money(p.amount) + '</span></div>';
+      });
+    }
     if (r.tendered != null) {
       html += '<div class="ct-row"><span>Tendered</span><span class="val">' + money(r.tendered) + '</span></div>' +
         '<div class="ct-row"><span>Change</span><span class="val" style="color:var(--good)">' + money(r.change) + '</span></div>';
@@ -1417,7 +2068,7 @@
       '<button class="toolbtn" id="receiptNew" style="background:var(--accent);color:#1a1714;border-color:var(--accent);">New Sale</button>' +
       '</div>';
     document.getElementById("receiptBody").innerHTML = html;
-    document.getElementById("receiptPrint").addEventListener("click", function () { window.print(); });
+    document.getElementById("receiptPrint").addEventListener("click", function () { printReceipt(r); });
     document.getElementById("receiptNew").addEventListener("click", function () {
       document.getElementById("receiptOverlay").classList.add("hidden");
     });
@@ -1446,6 +2097,14 @@
       .on("postgres_changes",
           { event: "*", schema: "public", table: "products", filter: "user_id=eq." + user.id },
           function () { loadAll(); })
+      .on("postgres_changes",
+          { event: "*", schema: "public", table: "held_sales", filter: "user_id=eq." + user.id },
+          function () {
+            sb.from("held_sales").select("*").order("created_at", { ascending: false })
+              .then(function (r) {
+                if (!r.error) { state.held = r.data || []; renderHeldBadge(); }
+              });
+          })
       .subscribe();
   }
 
@@ -1549,6 +2208,7 @@
       else if (act === "canceledit") cancelEdit();
       else if (act === "savedit") saveEdit(id);
       else if (act === "remove") removeProduct(id);
+      else if (act === "changecat") promptChangeCategory(id);
     });
     // POS clicks
     document.getElementById("productGrid").addEventListener("click", function (e) {
@@ -1556,22 +2216,37 @@
       if (tile && !tile.disabled) addToCart(tile.getAttribute("data-pid"));
     });
     document.getElementById("cartContent").addEventListener("click", function (e) {
-      var btn = e.target.closest("[data-cact]");
       var payBtn = e.target.closest("[data-pay]");
       if (payBtn) {
-        state.payment.method = payBtn.getAttribute("data-pay");
+        state.activePayMethod = payBtn.getAttribute("data-pay");
+        state.payTendered = "";
+        state.payReference = "";
         renderCart();
         return;
       }
+      var payRemove = e.target.closest("[data-pay-remove]");
+      if (payRemove) {
+        removePayment(payRemove.getAttribute("data-pay-remove"));
+        return;
+      }
       if (e.target.id === "completeSaleBtn") { completeSale(); return; }
+      var btn = e.target.closest("[data-cact]");
       if (!btn) return;
-      var act = btn.getAttribute("data-cact"), pid = btn.getAttribute("data-pid");
-      if (act === "inc") cartChange(pid, 1);
-      else if (act === "dec") cartChange(pid, -1);
-      else if (act === "rm") cartRemove(pid);
+      var act = btn.getAttribute("data-cact"), lid = btn.getAttribute("data-lid");
+      if (act === "inc") lineChange(lid, 1);
+      else if (act === "dec") lineChange(lid, -1);
+      else if (act === "rm") lineRemove(lid);
+      else if (act === "disc") promptLineDiscount(lid);
     });
     document.getElementById("cartClearBtn").addEventListener("click", function () {
       if (state.cart.length > 0 && confirm("Clear the cart?")) clearCart();
+    });
+    document.getElementById("cartHoldBtn").addEventListener("click", function () {
+      if (state.cart.length > 0) holdSale();
+    });
+    document.getElementById("heldBtn").addEventListener("click", function () {
+      renderHeldList();
+      document.getElementById("heldOverlay").classList.remove("hidden");
     });
     // view tabs
     document.querySelectorAll(".view-tab").forEach(function (t) {
@@ -1629,6 +2304,8 @@
         dOverlay.classList.add("hidden");
         sOverlay.classList.add("hidden");
         rOverlay.classList.add("hidden");
+        setOverlay.classList.add("hidden");
+        heldOverlay.classList.add("hidden");
       }
     });
     document.getElementById("signOutBtn").addEventListener("click", async function () {
@@ -1644,6 +2321,28 @@
         clearCfg(); location.reload();
       }
     });
+
+    // held sales modal
+    var heldOverlay = document.getElementById("heldOverlay");
+    document.getElementById("heldClose").addEventListener("click", function () { heldOverlay.classList.add("hidden"); });
+    heldOverlay.addEventListener("click", function (e) { if (e.target === heldOverlay) heldOverlay.classList.add("hidden"); });
+    document.getElementById("heldBody").addEventListener("click", function (e) {
+      var del = e.target.closest("[data-held-delete]");
+      if (del) { e.stopPropagation(); deleteHeld(del.getAttribute("data-held-delete")); return; }
+      var row = e.target.closest(".sales-row");
+      if (row) resumeHeld(row.getAttribute("data-held-id"));
+    });
+
+    // settings modal
+    var setOverlay = document.getElementById("settingsOverlay");
+    document.getElementById("settingsBtn").addEventListener("click", openSettings);
+    document.getElementById("settingsClose").addEventListener("click", function () { setOverlay.classList.add("hidden"); });
+    setOverlay.addEventListener("click", function (e) { if (e.target === setOverlay) setOverlay.classList.add("hidden"); });
+    document.getElementById("settingsSave").addEventListener("click", saveSettingsForm);
+    document.getElementById("settingsTestPrint").addEventListener("click", testPrint);
+
+    // start the global barcode scanner listener
+    installScanner();
     // config save
     document.getElementById("cfgSaveBtn").addEventListener("click", function () {
       var url = document.getElementById("cfgUrl").value.trim();
@@ -1658,6 +2357,262 @@
       location.reload();
     });
   }
+
+  /* ---------- shop settings (localStorage) ---------- */
+  var SETTINGS_KEY = "inv.settings.v1";
+  function loadSettings() {
+    try {
+      return Object.assign({
+        shopName: "", addr1: "", addr2: "", tin: "", footer: "Thank you!",
+        autoPrint: true, openDrawer: false
+      }, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"));
+    } catch (e) {
+      return { shopName: "", addr1: "", addr2: "", tin: "", footer: "Thank you!",
+        autoPrint: true, openDrawer: false };
+    }
+  }
+  function saveSettings(s) {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  }
+  var settings = loadSettings();
+
+  /* ---------- barcode scanner ----------
+     YHD-1100L (and most USB barcode scanners) emulate a keyboard.
+     A scan = burst of fast keystrokes ending with Enter.
+     We capture the burst, look up the SKU, and route based on the view. */
+  var scanBuffer = "";
+  var scanLastKeyAt = 0;
+  var SCAN_MAX_GAP_MS = 50;     // keystrokes faster than this = scanner, not human typing
+  var SCAN_MIN_LENGTH = 3;      // barcodes are always at least a few chars
+
+  function handleScannerKeydown(e) {
+    // ignore if a textarea or password field has focus — those are clearly typed input
+    var t = e.target;
+    var tag = (t.tagName || "").toLowerCase();
+    var typingField = (tag === "textarea") || (tag === "input" && t.type === "password");
+    if (typingField) return;
+
+    // also ignore modifier-key combos (cmd-C, etc.)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    var now = Date.now();
+    var gap = now - scanLastKeyAt;
+    scanLastKeyAt = now;
+
+    if (e.key === "Enter") {
+      // only treat as scan if buffer looks scanned (fast and long enough)
+      if (scanBuffer.length >= SCAN_MIN_LENGTH) {
+        var code = scanBuffer;
+        scanBuffer = "";
+        // if focus is in a regular text input, let it have the Enter normally
+        if (tag === "input" && (t.type === "text" || t.type === "search")) {
+          // for our own search boxes, drop the typed scan into them instead
+          if (t.id === "searchInput" || t.id === "posSearch") {
+            e.preventDefault();
+            handleScan(code);
+            return;
+          }
+          if (t.id === "f_sku") {
+            // user is scanning into the SKU field of the add-product form: leave it
+            return;
+          }
+        }
+        e.preventDefault();
+        handleScan(code);
+      } else {
+        scanBuffer = "";
+      }
+      return;
+    }
+
+    // ignore non-character keys (arrows, F-keys, shift alone, etc.)
+    if (e.key.length !== 1) return;
+
+    // if the gap since last key is too large, this is a human typing — start fresh
+    if (gap > SCAN_MAX_GAP_MS) scanBuffer = "";
+    scanBuffer += e.key;
+
+    // safety: cap buffer length
+    if (scanBuffer.length > 64) scanBuffer = "";
+  }
+
+  function findBySku(code) {
+    code = String(code || "").trim();
+    if (!code) return null;
+    // exact SKU match first, then case-insensitive
+    var hit = null;
+    state.products.forEach(function (p) {
+      if (p.sku === code) hit = p;
+    });
+    if (hit) return hit;
+    var lower = code.toLowerCase();
+    state.products.forEach(function (p) {
+      if (!hit && (p.sku || "").toLowerCase() === lower) hit = p;
+    });
+    return hit;
+  }
+
+  function flashScan(text, ok) {
+    var el = document.getElementById("scannerFlash");
+    el.textContent = text;
+    el.classList.toggle("miss", !ok);
+    el.classList.add("show");
+    setTimeout(function () { el.classList.remove("show"); }, 1400);
+    var dot = document.getElementById("scannerDot");
+    dot.classList.add("active");
+    setTimeout(function () { dot.classList.remove("active"); }, 800);
+  }
+
+  function handleScan(code) {
+    var p = findBySku(code);
+    if (!p) {
+      flashScan("Unknown code: " + code, false);
+      return;
+    }
+    if (state.view === "pos") {
+      addToCart(p.id);
+      flashScan("Added: " + p.name, true);
+    } else {
+      // inventory view: bump quantity by 1 (treats scan as a restock check-in)
+      flashScan(p.name + " — searched", true);
+      state.query = p.sku || p.name;
+      var s = document.getElementById("searchInput");
+      if (s) s.value = state.query;
+      document.getElementById("searchClear").classList.remove("hidden");
+      renderTable();
+      // scroll the row into view
+      setTimeout(function () {
+        var rows = document.querySelectorAll(".prow");
+        if (rows[0]) rows[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 60);
+    }
+  }
+
+  function installScanner() {
+    window.addEventListener("keydown", handleScannerKeydown, true);
+  }
+
+  /* ---------- thermal receipt rendering & print ---------- */
+  function buildThermalReceipt(r) {
+    var lines = [];
+    if (settings.shopName) lines.push('<div class="tr-center tr-big">' + esc(settings.shopName) + '</div>');
+    if (settings.addr1)    lines.push('<div class="tr-center">' + esc(settings.addr1) + '</div>');
+    if (settings.addr2)    lines.push('<div class="tr-center">' + esc(settings.addr2) + '</div>');
+    if (settings.tin)      lines.push('<div class="tr-center">TIN: ' + esc(settings.tin) + '</div>');
+    lines.push('<hr class="tr-sep" />');
+    lines.push('<div>Date: ' + esc(fmtDateTime(r.timestamp)) + '</div>');
+    lines.push('<div>Ref:  ' + esc(String(r.id).slice(0, 8).toUpperCase()) + '</div>');
+    lines.push('<hr class="tr-sep" />');
+
+    r.items.forEach(function (it) {
+      var ld = it.lineDiscount || 0;
+      var lineTotal = it.lineTotal != null ? it.lineTotal : (it.quantity * it.unitPrice);
+      lines.push(
+        '<div class="tr-row tr-item-name"><span>' + esc(it.name) + '</span></div>' +
+        '<div class="tr-row tr-item-qty">' +
+          '<span>  ' + it.quantity + ' x ' + money(it.unitPrice) + '</span>' +
+          '<span>' + money(it.quantity * it.unitPrice) + '</span>' +
+        '</div>' +
+        (ld > 0
+          ? '<div class="tr-row tr-item-qty"><span>  Discount</span><span>-' + money(ld) + '</span></div>'
+          : '')
+      );
+    });
+    lines.push('<hr class="tr-sep" />');
+    if (r.subtotal != null && (r.discount > 0 || r.subtotal !== r.total)) {
+      lines.push('<div class="tr-row"><span>Subtotal</span><span>' + money(r.subtotal) + '</span></div>');
+    }
+    if (r.discount > 0) {
+      lines.push('<div class="tr-row"><span>Discount' +
+        (r.discountNote ? ' (' + esc(r.discountNote) + ')' : '') +
+        '</span><span>-' + money(r.discount) + '</span></div>');
+    }
+    lines.push('<div class="tr-row tr-bold tr-big"><span>TOTAL</span><span>' + money(r.total) + '</span></div>');
+
+    // Per-payment breakdown
+    if (r.payments && r.payments.length) {
+      lines.push('<div class="tr-mt"></div>');
+      r.payments.forEach(function (p) {
+        var ml = { cash:"CASH", gcash:"GCASH", maya:"MAYA", card:"CARD",
+                   bank:"BANK XFER", other:"OTHER" }[p.method] || p.method.toUpperCase();
+        lines.push('<div class="tr-row"><span>' + ml +
+          (p.reference ? ' (' + esc(p.reference) + ')' : '') +
+          '</span><span>' + money(p.amount) + '</span></div>');
+      });
+    } else {
+      var payLabel = { cash:"CASH", gcash:"GCASH", maya:"MAYA", card:"CARD",
+                       bank:"BANK XFER", other:"OTHER" }[r.payment] || (r.payment || "").toUpperCase();
+      lines.push('<div class="tr-row tr-mt"><span>Payment</span><span>' + payLabel + '</span></div>');
+    }
+    if (r.tendered != null) {
+      lines.push('<div class="tr-row"><span>Tendered</span><span>' + money(r.tendered) + '</span></div>');
+      lines.push('<div class="tr-row"><span>Change</span><span>' + money(r.change) + '</span></div>');
+    }
+    lines.push('<hr class="tr-sep" />');
+    if (settings.footer) lines.push('<div class="tr-center">' + esc(settings.footer) + '</div>');
+    lines.push('<div class="tr-center" style="margin-top:6px;font-size:9pt;opacity:.7">' +
+               r.items.length + (r.items.length === 1 ? " item" : " items") + '</div>');
+    // feed a few blank lines so the cutter doesn't slice the footer
+    lines.push('<div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>');
+    return lines.join("");
+  }
+
+  function printReceipt(r) {
+    var el = document.getElementById("thermalReceipt");
+    el.innerHTML = buildThermalReceipt(r);
+    // small delay so the browser lays out before the print dialog steals focus
+    setTimeout(function () { window.print(); }, 50);
+  }
+
+  /* ---------- settings UI ---------- */
+  function openSettings() {
+    settings = loadSettings();
+    document.getElementById("setShopName").value = settings.shopName || "";
+    document.getElementById("setAddr1").value = settings.addr1 || "";
+    document.getElementById("setAddr2").value = settings.addr2 || "";
+    document.getElementById("setTin").value = settings.tin || "";
+    document.getElementById("setFooter").value = settings.footer || "";
+    document.getElementById("setAutoPrint").checked = !!settings.autoPrint;
+    document.getElementById("setOpenDrawer").checked = !!settings.openDrawer;
+    document.getElementById("settingsOverlay").classList.remove("hidden");
+  }
+  function saveSettingsForm() {
+    settings = {
+      shopName: document.getElementById("setShopName").value.trim(),
+      addr1: document.getElementById("setAddr1").value.trim(),
+      addr2: document.getElementById("setAddr2").value.trim(),
+      tin: document.getElementById("setTin").value.trim(),
+      footer: document.getElementById("setFooter").value.trim(),
+      autoPrint: document.getElementById("setAutoPrint").checked,
+      openDrawer: document.getElementById("setOpenDrawer").checked
+    };
+    saveSettings(settings);
+    toast("Settings saved");
+    document.getElementById("settingsOverlay").classList.add("hidden");
+  }
+  function testPrint() {
+    settings = {
+      shopName: document.getElementById("setShopName").value.trim(),
+      addr1: document.getElementById("setAddr1").value.trim(),
+      addr2: document.getElementById("setAddr2").value.trim(),
+      tin: document.getElementById("setTin").value.trim(),
+      footer: document.getElementById("setFooter").value.trim(),
+      autoPrint: settings.autoPrint, openDrawer: settings.openDrawer
+    };
+    var demo = {
+      id: "TEST" + Date.now().toString(36),
+      items: [
+        { name: "Sample Item A", quantity: 2, unitPrice: 25, unitCost: 18, lineDiscount: 0, lineTotal: 50 },
+        { name: "Sample Item B", quantity: 1, unitPrice: 150, unitCost: 100, lineDiscount: 0, lineTotal: 150 }
+      ],
+      subtotal: 200, discount: 0, discountNote: "",
+      total: 200,
+      payments: [{ method: "cash", amount: 200, tendered: 500, reference: "" }],
+      tendered: 500, change: 300, timestamp: new Date()
+    };
+    printReceipt(demo);
+  }
+
 
   /* ---------- boot ---------- */
   async function boot() {
