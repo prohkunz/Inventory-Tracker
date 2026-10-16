@@ -400,6 +400,43 @@
   }
   .scanner-flash.show { opacity:1; }
   .scanner-flash.miss { background:var(--bad); color:white; }
+
+  /* ---- Batch B: Suppliers & Restocking ---- */
+  .sup-row { display:grid; gap:10px; align-items:center; padding:11px 20px;
+    border-bottom:1px solid var(--line); font-size:13px;
+    grid-template-columns:1fr auto auto; }
+  .sup-row:last-child { border-bottom:none; }
+  .sup-name { font-weight:600; }
+  .sup-meta { font-size:12px; color:var(--muted); margin-top:2px; }
+
+  .po-row { display:grid; gap:10px; align-items:center; padding:11px 20px;
+    border-bottom:1px solid var(--line); font-size:13px; cursor:pointer;
+    grid-template-columns:auto 1fr auto auto; transition:background .15s ease; }
+  .po-row:hover { background:var(--panel2); }
+  .po-row .pi { width:30px; height:30px; border-radius:8px; display:grid; place-items:center; font-size:14px; }
+  .po-row .pn { font-weight:600; }
+  .po-row .pm { font-size:11px; color:var(--muted); font-family:'Spline Sans Mono',monospace; }
+  .po-row .pt { font-family:'Spline Sans Mono',monospace; font-weight:700; color:var(--accent); text-align:right; }
+  .status-pill { display:inline-block; padding:2px 9px; border-radius:20px; font-size:10px;
+    font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+  .status-pill.draft { background:var(--warnDim); color:var(--warn); }
+  .status-pill.received { background:var(--goodDim); color:var(--good); }
+
+  .po-line { display:grid; gap:8px; align-items:center; padding:9px 0;
+    border-bottom:1px solid var(--line); font-size:13px;
+    grid-template-columns:2fr 0.7fr 1fr 1fr auto; }
+  .po-line:last-child { border-bottom:none; }
+  .po-line input { background:var(--panel2); border:1px solid var(--line); border-radius:7px;
+    padding:6px 8px; color:var(--text); font-family:'Spline Sans Mono',monospace;
+    font-size:13px; width:100%; }
+  .po-line input:focus { border-color:var(--accent); outline:none; }
+  .po-totals { background:var(--panel2); border-radius:10px; padding:12px 14px; margin-top:12px; }
+  .inline-field { background:var(--panel2); border:1px solid var(--line); border-radius:9px;
+    padding:10px 12px; color:var(--text); font-size:14px; font-family:inherit; width:100%; margin-bottom:8px; }
+  .inline-field:focus { border-color:var(--accent); outline:none; }
+  .two-col { display:grid; gap:10px; grid-template-columns:1fr 1fr; }
+  .section-label { font-size:11px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.07em; font-weight:700; margin:16px 0 8px; }
 </style>
 </head>
 <body>
@@ -464,6 +501,8 @@
         <span class="sd"></span><span id="scannerLabel">Scanner ready</span>
       </span>
       <button class="toolbtn hidden" id="installBtn">⬇ Install</button>
+      <button class="toolbtn" id="suppliersBtn">🏭 Suppliers</button>
+      <button class="toolbtn" id="restockBtn">📋 Restock</button>
       <button class="toolbtn" id="heldBtn" style="position:relative">⏸ Held
         <span id="heldCount" class="hidden" style="position:absolute;top:-6px;right:-6px;background:var(--warn);color:#1a1714;font-size:10px;font-weight:800;border-radius:10px;padding:1px 6px;min-width:18px;text-align:center">0</span>
       </button>
@@ -662,6 +701,90 @@
         confirm once — most thermal printers print instantly without a paper-size prompt.
       </p>
     </div>
+  </div>
+</div>
+
+<!-- Suppliers modal -->
+<div class="overlay hidden" id="suppliersOverlay">
+  <div class="modal wide">
+    <div class="mhead">
+      <span style="color:var(--accent);font-size:18px;">🏭</span>
+      <span class="mtitle">Suppliers</span>
+      <button class="toolbtn" id="addSupplierBtn" style="font-size:12px;padding:7px 12px">+ Add Supplier</button>
+      <span class="x" id="suppliersClose">✕</span>
+    </div>
+    <div class="mbody padded" id="suppliersBody"></div>
+  </div>
+</div>
+
+<!-- Add/Edit Supplier modal -->
+<div class="overlay hidden" id="supplierFormOverlay">
+  <div class="modal">
+    <div class="mhead">
+      <span style="color:var(--accent);font-size:18px;">🏭</span>
+      <span class="mtitle" id="supplierFormTitle">Add Supplier</span>
+      <span class="x" id="supplierFormClose">✕</span>
+    </div>
+    <div class="mbody padded">
+      <div class="field-label">Supplier name *</div>
+      <input class="inline-field" id="sf_name" placeholder="e.g. URC Dumaguete" />
+      <div class="field-label">Contact person</div>
+      <input class="inline-field" id="sf_contact" placeholder="Name of sales rep" />
+      <div class="two-col">
+        <div>
+          <div class="field-label">Phone / Viber</div>
+          <input class="inline-field" id="sf_phone" placeholder="09XX XXX XXXX" />
+        </div>
+        <div>
+          <div class="field-label">Email (optional)</div>
+          <input class="inline-field" id="sf_email" placeholder="orders@..." />
+        </div>
+      </div>
+      <div class="field-label">Notes (payment terms, lead time, etc.)</div>
+      <textarea class="inline-field" id="sf_notes" rows="3" placeholder="e.g. Net 30, 3-day lead time, min order ₱5,000" style="resize:vertical"></textarea>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="toolbtn" id="supplierFormCancel">Cancel</button>
+        <button class="addbtn" id="supplierFormSave">Save Supplier</button>
+      </div>
+      <div class="err" id="supplierFormErr" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Restock (PO list) modal -->
+<div class="overlay hidden" id="restockOverlay">
+  <div class="modal wide">
+    <div class="mhead">
+      <span style="color:var(--accent);font-size:18px;">📋</span>
+      <span class="mtitle">Purchase Orders</span>
+      <button class="toolbtn" id="newPOBtn" style="font-size:12px;padding:7px 12px">+ New PO</button>
+      <span class="x" id="restockClose">✕</span>
+    </div>
+    <div class="mbody" id="restockBody"></div>
+  </div>
+</div>
+
+<!-- PO detail modal -->
+<div class="overlay hidden" id="poDetailOverlay">
+  <div class="modal wide">
+    <div class="mhead">
+      <span style="color:var(--accent);font-size:18px;">📄</span>
+      <span class="mtitle" id="poDetailTitle">Purchase Order</span>
+      <span class="x" id="poDetailClose">✕</span>
+    </div>
+    <div class="mbody padded" id="poDetailBody"></div>
+  </div>
+</div>
+
+<!-- New / Edit PO modal -->
+<div class="overlay hidden" id="poFormOverlay">
+  <div class="modal wide">
+    <div class="mhead">
+      <span style="color:var(--accent);font-size:18px;">📝</span>
+      <span class="mtitle" id="poFormTitle">New Purchase Order</span>
+      <span class="x" id="poFormClose">✕</span>
+    </div>
+    <div class="mbody padded" id="poFormBody"></div>
   </div>
 </div>
 
@@ -2306,6 +2429,11 @@
         rOverlay.classList.add("hidden");
         setOverlay.classList.add("hidden");
         heldOverlay.classList.add("hidden");
+        document.getElementById("suppliersOverlay").classList.add("hidden");
+        document.getElementById("supplierFormOverlay").classList.add("hidden");
+        document.getElementById("restockOverlay").classList.add("hidden");
+        document.getElementById("poDetailOverlay").classList.add("hidden");
+        document.getElementById("poFormOverlay").classList.add("hidden");
       }
     });
     document.getElementById("signOutBtn").addEventListener("click", async function () {
@@ -2343,6 +2471,8 @@
 
     // start the global barcode scanner listener
     installScanner();
+    // Batch B
+    wireBatchB();
     // config save
     document.getElementById("cfgSaveBtn").addEventListener("click", function () {
       var url = document.getElementById("cfgUrl").value.trim();
@@ -2641,6 +2771,583 @@
       }
     });
   }
+
+  /* ============================================================
+     BATCH B — SUPPLIERS & RESTOCKING
+     ============================================================ */
+
+  /* ---- state additions ---- */
+  state.suppliers = [];
+  state.purchaseOrders = [];
+  state.suppliersLoaded = false;
+  state.posLoaded = false;
+
+  /* ---- data loading ---- */
+  async function loadSuppliers() {
+    var res = await sb.from("suppliers").select("*").order("name", { ascending: true });
+    if (res.error) { toast("Couldn't load suppliers."); return; }
+    state.suppliers = res.data || [];
+    state.suppliersLoaded = true;
+  }
+
+  async function loadPurchaseOrders() {
+    var res = await sb.from("purchase_orders")
+      .select("*, purchase_order_items(*)")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (res.error) { toast("Couldn't load purchase orders."); return; }
+    state.purchaseOrders = res.data || [];
+    state.posLoaded = true;
+  }
+
+  function findSupplier(id) {
+    return state.suppliers.find(function (s) { return s.id === id; }) || null;
+  }
+
+  /* ---- suppliers UI ---- */
+  function renderSuppliersList() {
+    var b = document.getElementById("suppliersBody");
+    if (!state.suppliersLoaded) { b.innerHTML = '<div class="empty" style="padding:40px">Loading…</div>'; return; }
+    if (state.suppliers.length === 0) {
+      b.innerHTML = '<div class="empty" style="padding:48px"><div class="big">🏭</div>' +
+        '<div>No suppliers yet. Add one to start tracking where you buy stock.</div></div>'; return;
+    }
+    b.innerHTML = state.suppliers.map(function (s) {
+      var meta = [s.contact, s.phone, s.email].filter(Boolean).join(" · ");
+      return '<div class="sup-row">' +
+        '<div><div class="sup-name">' + esc(s.name) + '</div>' +
+        (meta ? '<div class="sup-meta">' + esc(meta) + '</div>' : '') +
+        (s.notes ? '<div class="sup-meta" style="font-style:italic;margin-top:2px">' + esc(s.notes) + '</div>' : '') +
+        '</div>' +
+        '<button class="ibtn" data-sup-edit="' + s.id + '" title="Edit">✏️</button>' +
+        '<button class="ibtn" data-sup-delete="' + s.id + '" title="Delete" style="color:var(--bad)">🗑</button>' +
+        '</div>';
+    }).join("");
+  }
+
+  var editingSupplierId = null;
+
+  function openAddSupplier() {
+    editingSupplierId = null;
+    document.getElementById("supplierFormTitle").textContent = "Add Supplier";
+    document.getElementById("sf_name").value = "";
+    document.getElementById("sf_contact").value = "";
+    document.getElementById("sf_phone").value = "";
+    document.getElementById("sf_email").value = "";
+    document.getElementById("sf_notes").value = "";
+    document.getElementById("supplierFormErr").textContent = "";
+    document.getElementById("supplierFormOverlay").classList.remove("hidden");
+  }
+
+  function openEditSupplier(id) {
+    var s = findSupplier(id);
+    if (!s) return;
+    editingSupplierId = id;
+    document.getElementById("supplierFormTitle").textContent = "Edit Supplier";
+    document.getElementById("sf_name").value = s.name || "";
+    document.getElementById("sf_contact").value = s.contact || "";
+    document.getElementById("sf_phone").value = s.phone || "";
+    document.getElementById("sf_email").value = s.email || "";
+    document.getElementById("sf_notes").value = s.notes || "";
+    document.getElementById("supplierFormErr").textContent = "";
+    document.getElementById("supplierFormOverlay").classList.remove("hidden");
+  }
+
+  async function saveSupplierForm() {
+    var errEl = document.getElementById("supplierFormErr");
+    var name = document.getElementById("sf_name").value.trim();
+    if (!name) { errEl.textContent = "Supplier name is required."; return; }
+    var payload = {
+      user_id: user.id,
+      name: name,
+      contact: document.getElementById("sf_contact").value.trim(),
+      phone: document.getElementById("sf_phone").value.trim(),
+      email: document.getElementById("sf_email").value.trim(),
+      notes: document.getElementById("sf_notes").value.trim()
+    };
+    setSync("busy");
+    var res = editingSupplierId
+      ? await sb.from("suppliers").update(payload).eq("id", editingSupplierId)
+      : await sb.from("suppliers").insert(payload);
+    if (res.error) { setSync("off"); errEl.textContent = "Save failed: " + res.error.message; return; }
+    setSync("ok");
+    document.getElementById("supplierFormOverlay").classList.add("hidden");
+    await loadSuppliers();
+    renderSuppliersList();
+    toast(editingSupplierId ? "Supplier updated" : "Supplier added");
+  }
+
+  async function deleteSupplier(id) {
+    var s = findSupplier(id);
+    if (!s) return;
+    if (!confirm('Delete supplier "' + s.name + '"? This will also detach it from any purchase orders.')) return;
+    setSync("busy");
+    var res = await sb.from("suppliers").delete().eq("id", id);
+    if (res.error) { setSync("off"); toast("Couldn't delete supplier."); return; }
+    setSync("ok");
+    await loadSuppliers();
+    renderSuppliersList();
+    toast("Supplier deleted");
+  }
+
+  /* ---- purchase order list UI ---- */
+  function renderPOList() {
+    var b = document.getElementById("restockBody");
+    if (!state.posLoaded) { b.innerHTML = '<div class="empty" style="padding:40px">Loading…</div>'; return; }
+    if (state.purchaseOrders.length === 0) {
+      b.innerHTML = '<div class="empty" style="padding:48px"><div class="big">📋</div>' +
+        '<div>No purchase orders yet. Create one to receive stock from a supplier.</div></div>'; return;
+    }
+    b.innerHTML = state.purchaseOrders.map(function (po) {
+      var sup = findSupplier(po.supplier_id);
+      var supName = sup ? sup.name : (po.supplier_name || "Unknown supplier");
+      var itemCount = (po.purchase_order_items || []).length;
+      var totalCost = (po.purchase_order_items || []).reduce(function (s, l) {
+        return s + (Number(l.quantity_ordered) * Number(l.unit_cost || 0));
+      }, 0);
+      var bg = po.status === "received" ? "var(--goodDim)" : "var(--warnDim)";
+      var fg = po.status === "received" ? "var(--good)" : "var(--warn)";
+      var icon = po.status === "received" ? "✅" : "📋";
+      return '<div class="po-row" data-po-id="' + po.id + '">' +
+        '<div class="pi" style="background:' + bg + ';color:' + fg + '">' + icon + '</div>' +
+        '<div><div class="pn">' + esc(supName) + (po.notes ? ' · <span style="font-weight:400">' + esc(po.notes.slice(0, 40)) + '</span>' : '') + '</div>' +
+        '<div class="pm">' + fmtDate(po.created_at) + ' · ' + itemCount + ' SKU' + (itemCount !== 1 ? 's' : '') + '</div></div>' +
+        '<span class="status-pill ' + esc(po.status) + '">' + esc(po.status) + '</span>' +
+        '<div class="pt">' + money(totalCost) + '</div>' +
+        '</div>';
+    }).join("");
+  }
+
+  /* ---- PO detail view ---- */
+  function showPODetail(poId) {
+    var po = state.purchaseOrders.find(function (p) { return p.id === poId; });
+    if (!po) return;
+    var sup = findSupplier(po.supplier_id);
+    var supName = sup ? sup.name : (po.supplier_name || "Unknown supplier");
+    var lines = po.purchase_order_items || [];
+    var totalCost = lines.reduce(function (s, l) {
+      return s + (Number(l.quantity_ordered) * Number(l.unit_cost || 0));
+    }, 0);
+    var isDraft = po.status === "draft";
+
+    document.getElementById("poDetailTitle").textContent = "PO · " + supName;
+    var html = '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:14px">' +
+      '<span class="status-pill ' + po.status + '">' + po.status + '</span>' +
+      '<span style="font-size:12px;color:var(--muted);font-family:\'Spline Sans Mono\',monospace">' + fmtDate(po.created_at) + '</span>' +
+      (po.notes ? '<span style="font-size:13px;color:var(--muted)">' + esc(po.notes) + '</span>' : '') +
+      '</div>';
+
+    html += '<div style="background:var(--panel2);border-radius:12px;overflow:hidden;margin-bottom:14px">';
+    html += '<div style="display:grid;gap:10px;padding:10px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:700;border-bottom:1px solid var(--line);grid-template-columns:2fr 0.7fr 1fr 1fr">' +
+      '<span>Product</span><span>Qty</span><span>Unit Cost</span><span>Subtotal</span></div>';
+
+    lines.forEach(function (l) {
+      var sub = Number(l.quantity_ordered) * Number(l.unit_cost || 0);
+      html += '<div style="display:grid;gap:10px;padding:10px 14px;font-size:13px;border-bottom:1px solid var(--line);grid-template-columns:2fr 0.7fr 1fr 1fr;align-items:center">' +
+        '<div><div style="font-weight:600">' + esc(l.name) + '</div>' +
+        (l.sku ? '<div style="font-size:11px;color:var(--muted);font-family:\'Spline Sans Mono\',monospace">' + esc(l.sku) + '</div>' : '') +
+        '</div>' +
+        '<div style="font-family:\'Spline Sans Mono\',monospace;font-weight:600">' + Number(l.quantity_ordered) + '</div>' +
+        '<div style="font-family:\'Spline Sans Mono\',monospace">' + money(l.unit_cost) + '</div>' +
+        '<div style="font-family:\'Spline Sans Mono\',monospace;font-weight:600;color:var(--accent)">' + money(sub) + '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+
+    html += '<div class="po-totals"><div class="ct-row big">' +
+      '<span>Total Cost</span><span class="val">' + money(totalCost) + '</span></div></div>';
+
+    if (isDraft) {
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">' +
+        '<button class="toolbtn" id="poEditBtn" data-po-id="' + po.id + '">✏️ Edit PO</button>' +
+        '<button class="addbtn" id="poReceiveBtn" data-po-id="' + po.id + '">✅ Receive Stock</button>' +
+        '<button class="toolbtn" id="poDeleteBtn" data-po-id="' + po.id + '" style="color:var(--bad)">🗑 Delete</button>' +
+        '</div>';
+    } else {
+      html += '<div style="margin-top:14px;font-size:13px;color:var(--good)">✅ Stock received and inventory updated.</div>';
+    }
+
+    document.getElementById("poDetailBody").innerHTML = html;
+    document.getElementById("poDetailOverlay").classList.remove("hidden");
+
+    if (isDraft) {
+      document.getElementById("poEditBtn").addEventListener("click", function () {
+        document.getElementById("poDetailOverlay").classList.add("hidden");
+        openPOForm(po.id);
+      });
+      document.getElementById("poReceiveBtn").addEventListener("click", function () {
+        receivePO(po.id);
+      });
+      document.getElementById("poDeleteBtn").addEventListener("click", function () {
+        deletePO(po.id);
+      });
+    }
+  }
+
+  /* ---- PO form (new / edit) ---- */
+  var poFormLines = [];   // [{lineId, productId, name, sku, qty, cost}]
+  var poFormSupplierId = null;
+  var editingPOId = null;
+
+  function openPOForm(editPoId) {
+    editingPOId = editPoId || null;
+    poFormLines = [];
+
+    if (!state.suppliersLoaded || state.suppliers.length === 0) {
+      toast("Add at least one supplier first.");
+      document.getElementById("suppliersOverlay").classList.remove("hidden");
+      renderSuppliersList();
+      return;
+    }
+
+    var po = editPoId ? state.purchaseOrders.find(function (p) { return p.id === editPoId; }) : null;
+
+    poFormSupplierId = po ? po.supplier_id : (state.suppliers[0] ? state.suppliers[0].id : null);
+    if (po && po.purchase_order_items) {
+      poFormLines = po.purchase_order_items.map(function (l) {
+        return { lineId: newLineId(), productId: l.product_id, name: l.name, sku: l.sku || "", qty: l.quantity_ordered, cost: l.unit_cost || 0 };
+      });
+    }
+
+    document.getElementById("poFormTitle").textContent = editPoId ? "Edit Purchase Order" : "New Purchase Order";
+    renderPOForm(po);
+    document.getElementById("poFormOverlay").classList.remove("hidden");
+  }
+
+  function renderPOForm(po) {
+    var notes = po ? (po.notes || "") : "";
+    var supOptions = state.suppliers.map(function (s) {
+      var sel = s.id === poFormSupplierId ? " selected" : "";
+      return '<option value="' + s.id + '"' + sel + '>' + esc(s.name) + '</option>';
+    }).join("");
+
+    var html = '<div class="field-label">Supplier *</div>' +
+      '<select class="inline-field" id="po_supplier" style="margin-bottom:10px">' + supOptions + '</select>' +
+      '<div class="field-label">Notes / PO reference (optional)</div>' +
+      '<input class="inline-field" id="po_notes" value="' + esc(notes) + '" placeholder="e.g. Order #1234, net 30" />' +
+      '<div class="section-label">Line Items</div>' +
+      '<div style="background:var(--panel2);border-radius:12px;overflow:hidden;margin-bottom:10px">' +
+      '<div style="display:grid;gap:8px;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:700;border-bottom:1px solid var(--line);grid-template-columns:2fr 0.7fr 1fr 1fr auto">' +
+        '<span>Product / Description</span><span>Qty</span><span>Unit Cost</span><span>Subtotal</span><span></span>' +
+      '</div>' +
+      '<div id="poLineItems">' + renderPOFormLines() + '</div>' +
+      '</div>' +
+      '<button class="toolbtn" id="poAddLineBtn" style="margin-bottom:14px">+ Add Line</button>' +
+      '<div class="po-totals" id="poFormTotals"></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">' +
+        '<button class="toolbtn" id="poFormCancelBtn">Cancel</button>' +
+        '<button class="addbtn" id="poFormSaveBtn">Save PO (draft)</button>' +
+      '</div>' +
+      '<div class="err" id="poFormErr" style="margin-top:8px"></div>';
+
+    document.getElementById("poFormBody").innerHTML = html;
+    updatePOFormTotals();
+    wirePOFormEvents();
+  }
+
+  function renderPOFormLines() {
+    if (poFormLines.length === 0) {
+      return '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">No lines yet — click "+ Add Line" below.</div>';
+    }
+    return poFormLines.map(function (l) {
+      var sub = Number(l.qty || 0) * Number(l.cost || 0);
+      // product dropdown options
+      var prodOpts = '<option value="">— custom —</option>' +
+        state.products.map(function (p) {
+          var sel = p.id === l.productId ? " selected" : "";
+          return '<option value="' + p.id + '"' + sel + '>' + esc(p.name) + (p.sku ? ' [' + p.sku + ']' : '') + '</option>';
+        }).join("");
+      return '<div class="po-line" data-po-line="' + l.lineId + '">' +
+        '<select class="po-line-prod" data-lid="' + l.lineId + '" style="background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;color:var(--text);font-size:12px;width:100%">' + prodOpts + '</select>' +
+        '<input class="po-line-qty" type="number" min="1" data-lid="' + l.lineId + '" value="' + Number(l.qty || 1) + '" style="background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;color:var(--text);font-family:\'Spline Sans Mono\',monospace;font-size:13px;width:100%" />' +
+        '<input class="po-line-cost" type="number" min="0" step="0.01" data-lid="' + l.lineId + '" value="' + Number(l.cost || 0).toFixed(2) + '" style="background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;color:var(--text);font-family:\'Spline Sans Mono\',monospace;font-size:13px;width:100%" />' +
+        '<div style="font-family:\'Spline Sans Mono\',monospace;font-size:13px;color:var(--accent);text-align:right" data-po-sub="' + l.lineId + '">' + money(sub) + '</div>' +
+        '<button class="ibtn" data-po-rm-line="' + l.lineId + '" style="color:var(--bad)">✕</button>' +
+        '</div>';
+    }).join("");
+  }
+
+  function updatePOFormTotals() {
+    var total = poFormLines.reduce(function (s, l) {
+      return s + (Number(l.qty || 0) * Number(l.cost || 0));
+    }, 0);
+    var el = document.getElementById("poFormTotals");
+    if (el) el.innerHTML = '<div class="ct-row big"><span>Total Cost</span><span class="val">' + money(total) + '</span></div>';
+  }
+
+  function wirePOFormEvents() {
+    var supSel = document.getElementById("po_supplier");
+    if (supSel) supSel.addEventListener("change", function () { poFormSupplierId = supSel.value; });
+
+    document.getElementById("poAddLineBtn").addEventListener("click", function () {
+      poFormLines.push({ lineId: newLineId(), productId: null, name: "", sku: "", qty: 1, cost: 0 });
+      document.getElementById("poLineItems").innerHTML = renderPOFormLines();
+      wirePOLineInputs();
+      updatePOFormTotals();
+    });
+
+    wirePOLineInputs();
+
+    document.getElementById("poFormSaveBtn").addEventListener("click", savePOForm);
+    document.getElementById("poFormCancelBtn").addEventListener("click", function () {
+      document.getElementById("poFormOverlay").classList.add("hidden");
+    });
+  }
+
+  function wirePOLineInputs() {
+    document.querySelectorAll(".po-line-prod").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var lid = sel.getAttribute("data-lid");
+        var line = poFormLines.find(function (l) { return l.lineId === lid; });
+        if (!line) return;
+        var pid = sel.value;
+        if (pid) {
+          var p = findProduct(pid);
+          if (p) { line.productId = pid; line.name = p.name; line.sku = p.sku || ""; line.cost = p.cost; }
+          // update cost field
+          var costEl = document.querySelector('.po-line-cost[data-lid="' + lid + '"]');
+          if (costEl) { costEl.value = Number(line.cost).toFixed(2); }
+        } else {
+          line.productId = null; line.name = ""; line.sku = "";
+        }
+        refreshPOLineSub(lid);
+      });
+    });
+
+    document.querySelectorAll(".po-line-qty").forEach(function (inp) {
+      inp.addEventListener("input", function () {
+        var lid = inp.getAttribute("data-lid");
+        var line = poFormLines.find(function (l) { return l.lineId === lid; });
+        if (line) { line.qty = Number(inp.value) || 0; refreshPOLineSub(lid); }
+      });
+    });
+
+    document.querySelectorAll(".po-line-cost").forEach(function (inp) {
+      inp.addEventListener("input", function () {
+        var lid = inp.getAttribute("data-lid");
+        var line = poFormLines.find(function (l) { return l.lineId === lid; });
+        if (line) { line.cost = Number(inp.value) || 0; refreshPOLineSub(lid); }
+      });
+    });
+
+    document.querySelectorAll("[data-po-rm-line]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var lid = btn.getAttribute("data-po-rm-line");
+        poFormLines = poFormLines.filter(function (l) { return l.lineId !== lid; });
+        document.getElementById("poLineItems").innerHTML = renderPOFormLines();
+        wirePOLineInputs();
+        updatePOFormTotals();
+      });
+    });
+  }
+
+  function refreshPOLineSub(lid) {
+    var line = poFormLines.find(function (l) { return l.lineId === lid; });
+    if (!line) return;
+    var sub = Number(line.qty || 0) * Number(line.cost || 0);
+    var el = document.querySelector('[data-po-sub="' + lid + '"]');
+    if (el) el.textContent = money(sub);
+    updatePOFormTotals();
+  }
+
+  async function savePOForm() {
+    var errEl = document.getElementById("poFormErr");
+    errEl.textContent = "";
+    if (!poFormSupplierId) { errEl.textContent = "Select a supplier."; return; }
+    if (poFormLines.length === 0) { errEl.textContent = "Add at least one line item."; return; }
+    for (var i = 0; i < poFormLines.length; i++) {
+      var l = poFormLines[i];
+      if (!l.productId && !l.name.trim()) {
+        // For custom lines, try reading the name from the select value
+        // but actually there's no text field for custom names in current form
+        // so just skip unnamed lines
+        errEl.textContent = "Each line must have a product selected or a name."; return;
+      }
+      if (!(Number(l.qty) > 0)) { errEl.textContent = "All quantities must be > 0."; return; }
+    }
+
+    var sup = findSupplier(poFormSupplierId);
+    var notes = (document.getElementById("po_notes") || {}).value || "";
+    setSync("busy");
+
+    var poPayload = {
+      user_id: user.id,
+      supplier_id: poFormSupplierId,
+      supplier_name: sup ? sup.name : "",
+      status: "draft",
+      notes: notes.trim()
+    };
+
+    var poRes, poId;
+    if (editingPOId) {
+      // delete old items, replace
+      await sb.from("purchase_order_items").delete().eq("po_id", editingPOId);
+      poRes = await sb.from("purchase_orders").update(poPayload).eq("id", editingPOId);
+      poId = editingPOId;
+    } else {
+      poRes = await sb.from("purchase_orders").insert(poPayload).select().single();
+      if (poRes.error) { setSync("off"); errEl.textContent = "Save failed: " + poRes.error.message; return; }
+      poId = poRes.data.id;
+    }
+
+    if (poRes.error && !editingPOId) { setSync("off"); errEl.textContent = "Save failed: " + poRes.error.message; return; }
+
+    var lineItems = poFormLines.map(function (l) {
+      var p = l.productId ? findProduct(l.productId) : null;
+      return {
+        po_id: poId,
+        user_id: user.id,
+        product_id: l.productId || null,
+        name: l.productId && p ? p.name : (l.name || "Custom"),
+        sku: l.productId && p ? (p.sku || "") : (l.sku || ""),
+        quantity_ordered: Number(l.qty),
+        unit_cost: Number(l.cost)
+      };
+    });
+
+    var lineRes = await sb.from("purchase_order_items").insert(lineItems);
+    if (lineRes.error) { setSync("off"); errEl.textContent = "Line items save failed: " + lineRes.error.message; return; }
+
+    setSync("ok");
+    document.getElementById("poFormOverlay").classList.add("hidden");
+    await loadPurchaseOrders();
+    renderPOList();
+    toast(editingPOId ? "PO updated" : "PO created");
+  }
+
+  /* ---- Receive PO ---- */
+  async function receivePO(poId) {
+    var po = state.purchaseOrders.find(function (p) { return p.id === poId; });
+    if (!po) return;
+    var sup = findSupplier(po.supplier_id);
+    var supName = sup ? sup.name : (po.supplier_name || "supplier");
+    var lines = po.purchase_order_items || [];
+    var inventoryLines = lines.filter(function (l) { return !!l.product_id; });
+
+    var totalCost = lines.reduce(function (s, l) {
+      return s + (Number(l.quantity_ordered) * Number(l.unit_cost || 0));
+    }, 0);
+
+    var msg = 'Receive this PO from "' + supName + '"?\n\n' +
+      inventoryLines.length + ' product(s) will have stock incremented.\n' +
+      'Total cost: ' + money(totalCost) + '\n\n' +
+      'This action cannot be undone.';
+    if (!confirm(msg)) return;
+
+    setSync("busy");
+    // increment stock for each product line and log history
+    var errors = [];
+    for (var i = 0; i < inventoryLines.length; i++) {
+      var l = inventoryLines[i];
+      var qty = Number(l.quantity_ordered);
+      var cost = Number(l.unit_cost || 0);
+      var p = findProduct(l.product_id);
+      var newQty = p ? p.quantity + qty : qty;
+
+      var upRes = await sb.from("products")
+        .update({ quantity: newQty, cost_price: cost })
+        .eq("id", l.product_id)
+        .eq("user_id", user.id);
+      if (upRes.error) { errors.push(l.name); continue; }
+
+      await logEntry({
+        type: "add",
+        name: l.name,
+        detail: "Restocked +" + qty + " from " + supName + " @ " + money(cost),
+        delta: qty,
+        price_snapshot: p ? p.price : null,
+        cost_snapshot: cost
+      });
+    }
+
+    // mark PO received
+    await sb.from("purchase_orders").update({ status: "received" }).eq("id", poId);
+
+    setSync("ok");
+    document.getElementById("poDetailOverlay").classList.add("hidden");
+    await Promise.all([loadAll(), loadPurchaseOrders()]);
+    renderPOList();
+
+    if (errors.length) {
+      toast("Stock updated with " + errors.length + " error(s): " + errors.join(", "));
+    } else {
+      toast("✅ PO received — stock updated");
+    }
+  }
+
+  async function deletePO(poId) {
+    if (!confirm("Delete this purchase order?")) return;
+    setSync("busy");
+    await sb.from("purchase_order_items").delete().eq("po_id", poId);
+    var res = await sb.from("purchase_orders").delete().eq("id", poId);
+    if (res.error) { setSync("off"); toast("Couldn't delete PO."); return; }
+    setSync("ok");
+    document.getElementById("poDetailOverlay").classList.add("hidden");
+    await loadPurchaseOrders();
+    renderPOList();
+    toast("PO deleted");
+  }
+
+  /* ---- wire new buttons in wireApp ---- */
+  function wireBatchB() {
+    // Suppliers modal
+    var supOverlay = document.getElementById("suppliersOverlay");
+    document.getElementById("suppliersBtn").addEventListener("click", async function () {
+      if (!state.suppliersLoaded) await loadSuppliers();
+      renderSuppliersList();
+      supOverlay.classList.remove("hidden");
+    });
+    document.getElementById("suppliersClose").addEventListener("click", function () { supOverlay.classList.add("hidden"); });
+    supOverlay.addEventListener("click", function (e) { if (e.target === supOverlay) supOverlay.classList.add("hidden"); });
+    document.getElementById("suppliersBody").addEventListener("click", function (e) {
+      var editBtn = e.target.closest("[data-sup-edit]");
+      if (editBtn) { openEditSupplier(editBtn.getAttribute("data-sup-edit")); return; }
+      var delBtn = e.target.closest("[data-sup-delete]");
+      if (delBtn) { deleteSupplier(delBtn.getAttribute("data-sup-delete")); return; }
+    });
+    document.getElementById("addSupplierBtn").addEventListener("click", openAddSupplier);
+
+    // Supplier form modal
+    var sfOverlay = document.getElementById("supplierFormOverlay");
+    document.getElementById("supplierFormClose").addEventListener("click", function () { sfOverlay.classList.add("hidden"); });
+    document.getElementById("supplierFormCancel").addEventListener("click", function () { sfOverlay.classList.add("hidden"); });
+    sfOverlay.addEventListener("click", function (e) { if (e.target === sfOverlay) sfOverlay.classList.add("hidden"); });
+    document.getElementById("supplierFormSave").addEventListener("click", saveSupplierForm);
+    document.getElementById("sf_name").addEventListener("keydown", function (e) { if (e.key === "Enter") saveSupplierForm(); });
+
+    // Restock / PO list modal
+    var rsOverlay = document.getElementById("restockOverlay");
+    document.getElementById("restockBtn").addEventListener("click", async function () {
+      rsOverlay.classList.remove("hidden");
+      if (!state.suppliersLoaded) await loadSuppliers();
+      if (!state.posLoaded) await loadPurchaseOrders();
+      renderPOList();
+    });
+    document.getElementById("restockClose").addEventListener("click", function () { rsOverlay.classList.add("hidden"); });
+    rsOverlay.addEventListener("click", function (e) { if (e.target === rsOverlay) rsOverlay.classList.add("hidden"); });
+    document.getElementById("restockBody").addEventListener("click", function (e) {
+      var row = e.target.closest(".po-row");
+      if (row) showPODetail(row.getAttribute("data-po-id"));
+    });
+    document.getElementById("newPOBtn").addEventListener("click", async function () {
+      if (!state.suppliersLoaded) await loadSuppliers();
+      openPOForm(null);
+    });
+
+    // PO detail modal
+    var pdOverlay = document.getElementById("poDetailOverlay");
+    document.getElementById("poDetailClose").addEventListener("click", function () { pdOverlay.classList.add("hidden"); });
+    pdOverlay.addEventListener("click", function (e) { if (e.target === pdOverlay) pdOverlay.classList.add("hidden"); });
+
+    // PO form modal
+    var pfOverlay = document.getElementById("poFormOverlay");
+    document.getElementById("poFormClose").addEventListener("click", function () { pfOverlay.classList.add("hidden"); });
+    pfOverlay.addEventListener("click", function (e) { if (e.target === pfOverlay) pfOverlay.classList.add("hidden"); });
+  }
+
+  /* ============================================================
+     END BATCH B
+     ============================================================ */
 
   boot();
 })();
