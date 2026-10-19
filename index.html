@@ -3945,15 +3945,14 @@
 
     // re-render sales list if open
     if (!document.getElementById("salesOverlay").classList.contains("hidden")) {
-      renderSalesListC();
+      renderSalesList();
     }
   }
 
   /* Re-render the sales list with void buttons injected.
      We patch renderSales (defined in the main block) by wrapping it. */
-  function renderSalesListC() {
-    // Delegate to the existing renderSales function, then patch in void buttons
-    renderSalesList();
+  function decorateSalesRows() {
+    // runs after every renderSalesList(): adds void buttons / VOID badges
     // inject "Void" buttons next to each completed sale row
     document.querySelectorAll(".sales-row").forEach(function (row) {
       var sid = row.getAttribute("data-sale-id");
@@ -4167,12 +4166,8 @@
     patchDashboard();
 
     /* Extend sales list to support voids — patch salesBtn click */
-    var origSalesBtn = document.getElementById("salesBtn");
-    if (origSalesBtn) {
-      origSalesBtn.addEventListener("click", function () {
-        setTimeout(renderSalesListC, 80);
-      });
-    }
+    var _origRenderSalesList = renderSalesList;
+    renderSalesList = function () { _origRenderSalesList(); decorateSalesRows(); };
 
     /* Extend Escape key handler */
     document.addEventListener("keydown", function (e) {
