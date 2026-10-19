@@ -3508,7 +3508,12 @@
       return s.status !== "void" && new Date(s.created_at) >= dayStart && new Date(s.created_at) <= dayEnd;
     });
 
-    var totalSales = daySales.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
+    var netSales   = daySales.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
+    var totalSales = daySales.reduce(function (a, s) { return a + Number(s.subtotal != null ? s.subtotal : s.total || 0); }, 0);
+    var voidSales  = state.sales.filter(function (s) {
+      return s.status === "void" && new Date(s.created_at) >= dayStart && new Date(s.created_at) <= dayEnd;
+    });
+    var voidTotal  = voidSales.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
     var totalDisc  = daySales.reduce(function (a, s) { return a + Number(s.discount || 0); }, 0);
     var txCount    = daySales.length;
     var itemCount  = daySales.reduce(function (a, s) {
@@ -3528,12 +3533,12 @@
     }).join("") || '<div class="zr-row zr-muted"><span>No payments</span></div>';
 
     // Gross profit estimate
-    var grossProfit = daySales.reduce(function (a, s) {
+    var dayCogs = daySales.reduce(function (a, s) {
       return a + (s.sale_items || []).reduce(function (b, i) {
-        var profit = (Number(i.unit_price || 0) - Number(i.unit_cost || 0)) * Number(i.quantity || 0);
-        return b + (isNaN(profit) ? 0 : profit);
+        return b + Number(i.unit_cost || 0) * Number(i.quantity || 0);
       }, 0);
     }, 0);
+    var grossProfit = netSales - dayCogs;
 
     var todayStr = now.toLocaleDateString("en-PH", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
 
@@ -3546,7 +3551,7 @@
         '<div class="zr-row"><span>Discounts Given</span>' +
           '<span style="font-family:\'Spline Sans Mono\',monospace;color:var(--bad)">-' + money(totalDisc) + '</span></div>' +
         '<div class="zr-row"><span>Net Sales</span>' +
-          '<span style="font-family:\'Spline Sans Mono\',monospace">' + money(totalSales - totalDisc) + '</span></div>' +
+          '<span style="font-family:\'Spline Sans Mono\',monospace">' + money(netSales) + '</span></div>' +
         '<div class="zr-row"><span>Est. Gross Profit</span>' +
           '<span style="font-family:\'Spline Sans Mono\',monospace;color:var(--good)">' + money(grossProfit) + '</span></div>' +
       '</div>' +
@@ -3554,7 +3559,8 @@
       '<div class="zr-section">' +
         '<div class="zr-row"><span>Transactions</span><span style="font-family:\'Spline Sans Mono\',monospace">' + txCount + '</span></div>' +
         '<div class="zr-row"><span>Items Sold</span><span style="font-family:\'Spline Sans Mono\',monospace">' + itemCount + '</span></div>' +
-        (txCount > 0 ? '<div class="zr-row"><span>Avg Basket</span><span style="font-family:\'Spline Sans Mono\',monospace">' + money(totalSales / txCount) + '</span></div>' : '') +
+        (txCount > 0 ? '<div class="zr-row"><span>Avg Basket</span><span style="font-family:\'Spline Sans Mono\',monospace">' + money(netSales / txCount) + '</span></div>' : '') +
+        '<div class="zr-row"><span>Voided Sales</span><span style="font-family:\'Spline Sans Mono\',monospace;' + (voidSales.length ? 'color:var(--bad)' : '') + '">' + voidSales.length + (voidSales.length ? ' (' + money(voidTotal) + ')' : '') + '</span></div>' +
       '</div>' +
 
       '<div class="zr-section">' +
@@ -3569,11 +3575,11 @@
 
       (txCount === 0 ? '<div style="margin-top:14px;font-size:13px;color:var(--muted)">No sales recorded today yet.</div>' : '');
 
-    document.getElementById("zrPrintBtn").addEventListener("click", function () { printZReport(daySales, todayStr, totalSales, totalDisc, txCount, itemCount, grossProfit, pmMap); });
+    document.getElementById("zrPrintBtn").addEventListener("click", function () { printZReport(daySales, todayStr, totalSales, totalDisc, txCount, itemCount, grossProfit, pmMap, netSales, voidSales.length, voidTotal); });
     document.getElementById("zrCsvBtn").addEventListener("click", function () { exportZReportCSV(daySales, todayStr); });
   }
 
-  function printZReport(daySales, todayStr, total, disc, txCount, items, profit, pmMap) {
+  function printZReport(daySales, todayStr, total, disc, txCount, items, profit, pmMap, net, voidCount, voidTotal) {
     var s = settings || {};
     var lines = [
       (s.shopName || "Shop"),
@@ -3582,11 +3588,12 @@
       "",
       "Gross Sales:    " + money(total),
       "Discounts:     -" + money(disc),
-      "Net Sales:      " + money(total - disc),
+      "Net Sales:      " + money(net),
       "Est. Profit:    " + money(profit),
       "",
       "Transactions:   " + txCount,
       "Items Sold:     " + items,
+      "Voided:         " + voidCount + (voidCount ? " (" + money(voidTotal) + ")" : ""),
       "",
       "-- Payment Breakdown --"
     ];
