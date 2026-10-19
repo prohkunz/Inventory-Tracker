@@ -3747,7 +3747,7 @@
   /* ---- reorder alerts ---- */
   function renderReorderAlerts(el) {
     var alerts = state.products.filter(function (p) {
-      return p.low_stock_alert != null && Number(p.quantity) <= Number(p.low_stock_alert);
+      return p.lowStock != null && Number(p.quantity) <= Number(p.lowStock);
     }).sort(function (a, b) { return a.quantity - b.quantity; });
 
     if (!alerts.length) {
@@ -3763,7 +3763,7 @@
         return '<div class="slow-row">' +
           '<div style="flex:1">' +
             '<div style="font-weight:600;font-size:13px">' + esc(p.name) + '</div>' +
-            '<div style="font-size:11px;color:var(--muted)">Reorder at: ' + Number(p.low_stock_alert) + '</div>' +
+            '<div style="font-size:11px;color:var(--muted)">Reorder at: ' + Number(p.lowStock) + '</div>' +
           '</div>' +
           '<span class="slow-badge ' + (isCritical ? "zero" : "low") + '">' +
             (isCritical ? "OUT OF STOCK" : "Stock: " + p.quantity) +
