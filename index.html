@@ -2036,6 +2036,7 @@
       var bg, fg, icon;
       if (h.type === "sale") { bg = "var(--goodDim)"; fg = "var(--good)"; icon = "🛒"; }
       else if (h.type === "add") { bg = "var(--accentDim)"; fg = "var(--accent)"; icon = "+"; }
+      else if (h.type === "void") { bg = "#c0473722"; fg = "var(--bad)"; icon = "🚫"; }
       else if (h.type === "remove") { bg = "#c0473722"; fg = "var(--bad)"; icon = "🗑"; }
       else { bg = "var(--warnDim)"; fg = "var(--warn)"; icon = (h.delta > 0 ? "▲" : "▼"); }
       return '<div class="hrow">' +
@@ -2077,13 +2078,14 @@
     var byProduct = {};
     state.history.forEach(function (h) {
       if (!h.delta) return;
-      var isSale = (h.type === "sale") || (h.type === "adjust" && h.delta < 0);
+      var isVoid = (h.type === "void");
+      var isSale = (h.type === "sale") || (h.type === "adjust" && h.delta < 0) || isVoid;
       var isRestock = (h.type === "adjust" && h.delta > 0);
       if (!isSale && !isRestock) return;
       var t = new Date(h.ts).getTime();
       if (t < startMs || t > endMs) return;
       if (isSale) {
-        var units = Math.abs(h.delta);
+        var units = isVoid ? -Math.abs(h.delta) : Math.abs(h.delta);
         var fb = (h.priceSnapshot == null || h.costSnapshot == null)
           ? fallbackPriceCostFor(h.name) : null;
         var price = h.priceSnapshot != null ? h.priceSnapshot : fb.price;
@@ -3855,7 +3857,7 @@
           Number(s.discount || 0).toFixed(2),
           Number(s.total || 0).toFixed(2),
           pm,
-          Number(s.change_given || 0).toFixed(2)
+          Number(s.change_amt || 0).toFixed(2)
         ]);
       });
       downloadCSV("sales-" + fromStr + "-to-" + toStr + ".csv", rows);
@@ -3868,7 +3870,7 @@
         (s.sale_items || []).forEach(function (i) {
           liRows.push([
             dt, tm, s.id, st,
-            i.name || "", i.sku || "", i.category || "",
+            i.name || "", i.sku || "", ((findProduct(i.product_id) || {}).category || ""),
             Number(i.quantity || 0),
             Number(i.unit_price || 0).toFixed(2),
             Number(i.unit_cost  || 0).toFixed(2),
@@ -3910,7 +3912,7 @@
 
       // log history entry for void
       await logEntry({
-        type: "add",
+        type: "void",
         name: item.name || "Unknown",
         detail: "Void of sale " + saleId.slice(0, 8) + "… · +" + Number(item.quantity) + " returned",
         delta: Number(item.quantity || 0),
