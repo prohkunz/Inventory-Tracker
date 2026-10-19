@@ -181,6 +181,64 @@ alter publication supabase_realtime add table public.history;
 alter publication supabase_realtime add table public.suppliers;
 alter publication supabase_realtime add table public.purchase_orders;
 
+-- ============================================================
+-- CASH DRAWERS, SHIFTS, PAID IN/OUT  (migration: cash_drawers_shifts_movements, 2026-10-19)
+-- A drawer is a named till. A shift is one person's session on a drawer
+-- (staff_name is a typed label, not a user account). Sales are linked to the
+-- shift that was open when they were rung up. Expected cash =
+--   opening_float + cash sales in the shift + paid in - paid out
+-- ============================================================
+
+create table if not exists public.cash_drawers (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id),
+  name        text not null,
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.cash_shifts (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid not null references auth.users(id),
+  drawer_id      uuid not null references public.cash_drawers(id),
+  staff_name     text not null default '',
+  opening_float  numeric not null default 0 check (opening_float >= 0),
+  status         text not null default 'open' check (status in ('open','closed')),
+  opened_at      timestamptz not null default now(),
+  closed_at      timestamptz,
+  expected_cash  numeric,
+  counted_cash   numeric,
+  variance       numeric,          -- counted - expected (negative = short)
+  close_note     text not null default ''
+);
+
+create table if not exists public.cash_movements (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id),
+  shift_id    uuid not null references public.cash_shifts(id),
+  type        text not null check (type in ('in','out')),
+  amount      numeric not null check (amount > 0),
+  reason      text not null default '',
+  created_at  timestamptz not null default now()
+);
+
+alter table public.sales add column if not exists shift_id uuid references public.cash_shifts(id);
+
+-- only one open shift per drawer
+create unique index if not exists cash_shifts_one_open_per_drawer on public.cash_shifts (drawer_id) where status = 'open';
+create index if not exists cash_drawers_user_idx     on public.cash_drawers (user_id);
+create index if not exists cash_shifts_user_idx      on public.cash_shifts (user_id, opened_at desc);
+create index if not exists cash_movements_shift_idx  on public.cash_movements (shift_id);
+create index if not exists sales_shift_idx           on public.sales (shift_id);
+
+alter table public.cash_drawers   enable row level security;
+alter table public.cash_shifts    enable row level security;
+alter table public.cash_movements enable row level security;
+
+create policy "own cash drawers"   on public.cash_drawers   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own cash shifts"    on public.cash_shifts    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own cash movements" on public.cash_movements for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 -- ---------- record_sale(): atomic sale transaction ----------
 -- Validates stock and payment, inserts sale + items + payments, decrements
 -- stock and writes history rows, all in one transaction. Runs as the caller

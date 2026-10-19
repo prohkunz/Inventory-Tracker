@@ -549,6 +549,7 @@
       </button>
       <button class="toolbtn" id="settingsBtn">⚙ Settings</button>
       <button class="toolbtn" id="salesBtn">🧾 Sales</button>
+      <button class="toolbtn" id="cashBtn">💵 Cash</button>
       <button class="toolbtn" id="zreportBtn">🔒 Z-Report</button>
       <button class="toolbtn" id="reportsBtn">📈 Reports</button>
       <button class="toolbtn" id="dashboardBtn">📊 Dashboard</button>
@@ -864,6 +865,18 @@
         <div class="empty" style="padding:40px">Loading…</div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ======= CASH DRAWER MODAL ======= -->
+<div class="overlay hidden" id="cashOverlay">
+  <div class="modal">
+    <div class="mhead">
+      <span style="color:var(--good);font-size:18px;">💵</span>
+      <span class="mtitle">Cash Drawer</span>
+      <span class="x" id="cashClose">✕</span>
+    </div>
+    <div class="mbody padded" id="cashBody"></div>
   </div>
 </div>
 
@@ -1310,6 +1323,9 @@
       toast("Sale failed: " + res.error.message);
       return;
     }
+
+    // link the sale to the active cash shift (Batch D)
+    await tagSaleShift(res.data);
 
     // If this was a held sale, delete the held record now that we sold it
     if (state.heldId) {
@@ -2556,6 +2572,8 @@
     wireBatchB();
     // Batch C
     wireBatchC();
+    // Batch D
+    wireBatchD();
     // config save
     document.getElementById("cfgSaveBtn").addEventListener("click", function () {
       var url = document.getElementById("cfgUrl").value.trim();
@@ -3486,8 +3504,10 @@
      Z-REPORT
      ================================================================ */
 
-  function openZReport() {
+  async function openZReport() {
     document.getElementById("zreportOverlay").classList.remove("hidden");
+    renderZReport();
+    try { await loadCash(); } catch (e) {}
     renderZReport();
   }
 
@@ -3567,6 +3587,7 @@
         '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Payment Breakdown</div>' +
         pmRows +
       '</div>' +
+      cashSectionHtml(dayStart, dayEnd) +
 
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">' +
         '<button class="toolbtn" id="zrPrintBtn">🖨 Print Z-Report</button>' +
@@ -3577,6 +3598,11 @@
 
     document.getElementById("zrPrintBtn").addEventListener("click", function () { printZReport(daySales, todayStr, totalSales, totalDisc, txCount, itemCount, grossProfit, pmMap, netSales, voidSales.length, voidTotal); });
     document.getElementById("zrCsvBtn").addEventListener("click", function () { exportZReportCSV(daySales, todayStr); });
+    var zrCash = document.getElementById("zrCashBtn");
+    if (zrCash) zrCash.addEventListener("click", function () {
+      document.getElementById("zreportOverlay").classList.add("hidden");
+      openCash();
+    });
   }
 
   function printZReport(daySales, todayStr, total, disc, txCount, items, profit, pmMap, net, voidCount, voidTotal) {
@@ -3598,6 +3624,10 @@
       "-- Payment Breakdown --"
     ];
     Object.keys(pmMap).forEach(function (k) { lines.push(k + ": " + money(pmMap[k])); });
+    if (state.zrCashLines && state.zrCashLines.length) {
+      lines.push("", "-- Cash Drawers --");
+      state.zrCashLines.forEach(function (l) { lines.push(l); });
+    }
     lines.push("", "Printed: " + new Date().toLocaleString("en-PH"));
 
     var w = window.open("", "_blank", "width=400,height=600");
@@ -4190,6 +4220,396 @@
 
   /* ============================================================
      END BATCH C
+     ============================================================ */
+
+
+  /* ============================================================
+     BATCH D — CASH DRAWERS · SHIFTS · PAID IN / OUT
+     ============================================================ */
+
+  state.drawers = [];
+  state.shifts = [];            // most recent 60 shifts (all drawers)
+  state.shiftMoves = {};        // open shift id -> [movements]
+  state.shiftCash = {};         // open shift id -> cash sales total
+  state.shiftSaleCount = {};    // open shift id -> number of sales
+  state.cashLoaded = false;
+  state.cashView = "main";      // main | in | out | close | drawer
+  state.activeDrawerId = null;
+  state.zrCashLines = [];
+  try { state.activeDrawerId = localStorage.getItem("inv.drawer") || null; } catch (e) {}
+
+  function findDrawer(id) {
+    return state.drawers.find(function (d) { return d.id === id; }) || null;
+  }
+  function openShiftFor(drawerId) {
+    return state.shifts.find(function (s) { return s.drawer_id === drawerId && s.status === "open"; }) || null;
+  }
+  function activeShift() {
+    return state.activeDrawerId ? openShiftFor(state.activeDrawerId) : null;
+  }
+
+  async function loadCash() {
+    var dr = await sb.from("cash_drawers").select("*").order("created_at", { ascending: true });
+    if (dr.error) { toast("Couldn't load cash drawers."); return; }
+    var drawers = dr.data || [];
+    if (drawers.length === 0) {
+      var ins = await sb.from("cash_drawers").insert({ user_id: user.id, name: "Main drawer" }).select().single();
+      if (ins.error) { toast("Couldn't create the first cash drawer."); return; }
+      drawers = [ins.data];
+    }
+    state.drawers = drawers;
+    if (!state.activeDrawerId || !findDrawer(state.activeDrawerId)) {
+      state.activeDrawerId = drawers[0].id;
+    }
+
+    var sh = await sb.from("cash_shifts").select("*").order("opened_at", { ascending: false }).limit(60);
+    if (sh.error) { toast("Couldn't load cash shifts."); return; }
+    state.shifts = sh.data || [];
+
+    // movements + cash sales are only needed live for OPEN shifts;
+    // closed shifts keep their saved expected / counted / variance.
+    state.shiftMoves = {}; state.shiftCash = {}; state.shiftSaleCount = {};
+    var openIds = state.shifts.filter(function (s) { return s.status === "open"; })
+      .map(function (s) { return s.id; });
+    if (openIds.length) {
+      var mv = await sb.from("cash_movements").select("*").in("shift_id", openIds)
+        .order("created_at", { ascending: true });
+      (mv.data || []).forEach(function (m) {
+        (state.shiftMoves[m.shift_id] = state.shiftMoves[m.shift_id] || []).push(m);
+      });
+      var sl = await sb.from("sales").select("id,shift_id,status,payments(method,amount)")
+        .in("shift_id", openIds).limit(5000);
+      (sl.data || []).forEach(function (s) {
+        if (s.status === "void") return;
+        var cash = (s.payments || []).reduce(function (a, p) {
+          return a + (p.method === "cash" ? Number(p.amount || 0) : 0);
+        }, 0);
+        state.shiftCash[s.shift_id] = (state.shiftCash[s.shift_id] || 0) + cash;
+        state.shiftSaleCount[s.shift_id] = (state.shiftSaleCount[s.shift_id] || 0) + 1;
+      });
+    }
+    state.cashLoaded = true;
+    updateCashBtn();
+  }
+
+  function shiftFigures(shift) {
+    if (shift.status === "closed") {
+      return {
+        expected: Number(shift.expected_cash || 0), counted: Number(shift.counted_cash || 0),
+        variance: Number(shift.variance || 0), closed: true
+      };
+    }
+    var moves = state.shiftMoves[shift.id] || [];
+    var pin = 0, pout = 0;
+    moves.forEach(function (m) {
+      if (m.type === "in") pin += Number(m.amount); else pout += Number(m.amount);
+    });
+    var cashSales = state.shiftCash[shift.id] || 0;
+    var fl = Number(shift.opening_float || 0);
+    return {
+      float: fl, cashSales: cashSales, paidIn: pin, paidOut: pout, moves: moves,
+      salesCount: state.shiftSaleCount[shift.id] || 0,
+      expected: fl + cashSales + pin - pout, closed: false
+    };
+  }
+
+  function updateCashBtn() {
+    var b = document.getElementById("cashBtn");
+    if (!b) return;
+    var sh = activeShift();
+    b.innerHTML = '💵 Cash ' + (sh
+      ? '<span style="color:var(--good)">● ' + esc(sh.staff_name || "open") + '</span>'
+      : '<span style="color:var(--warn)">○ no shift</span>');
+  }
+
+  /* ---- tag each sale with the active shift right after it's recorded ---- */
+  async function tagSaleShift(saleId) {
+    var sh = activeShift();
+    if (!sh) {
+      if (!state._noShiftHinted) {
+        state._noShiftHinted = true;
+        toast("Tip: start a cash shift (💵 Cash) so sales count toward the drawer.");
+      }
+      return;
+    }
+    try {
+      var r = await sb.from("sales").update({ shift_id: sh.id }).eq("id", saleId);
+      if (r.error) toast("Sale saved, but couldn't link it to the cash shift.");
+    } catch (e) {}
+  }
+
+  /* ---- cash drawer modal ---- */
+  var MONO = "font-family:'Spline Sans Mono',monospace";
+
+  function varianceHtml(v) {
+    var color = Math.abs(v) < 0.005 ? "var(--good)" : (v < 0 ? "var(--bad)" : "var(--warn)");
+    var label = Math.abs(v) < 0.005 ? "Balanced" : (v < 0 ? "Short " : "Over ") + money(Math.abs(v));
+    return '<span style="color:' + color + ';font-weight:700">' + label + '</span>';
+  }
+
+  function renderCash() {
+    var el = document.getElementById("cashBody");
+    if (!state.cashLoaded) { el.innerHTML = '<div class="empty" style="padding:40px">Loading…</div>'; return; }
+    var drawer = findDrawer(state.activeDrawerId);
+    var shift = activeShift();
+    var view = state.cashView;
+
+    var opts = state.drawers.map(function (d) {
+      return '<option value="' + d.id + '"' + (d.id === state.activeDrawerId ? " selected" : "") + '>' + esc(d.name) +
+        (openShiftFor(d.id) ? "  ●" : "") + '</option>';
+    }).join("");
+    var html = '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">' +
+      '<select class="inline-field" id="cashDrawerSel" style="width:auto;min-width:180px;margin:0">' + opts + '</select>' +
+      '<button class="toolbtn" data-cash-act="newdrawer" style="font-size:12px;padding:7px 12px">+ Add drawer</button></div>';
+
+    if (view === "drawer") {
+      html += '<div class="zr-section"><div class="field-label">New drawer name</div>' +
+        '<input class="inline-field" id="cashNewDrawer" placeholder="e.g. Cashier 2, Payment counter" />' +
+        '<div style="display:flex;gap:8px"><button class="toolbtn" data-cash-act="cancel">Cancel</button>' +
+        '<button class="addbtn" data-cash-act="savedrawer">Add drawer</button></div></div>';
+    } else if (!shift) {
+      var last = state.shifts.find(function (s) { return s.drawer_id === state.activeDrawerId; });
+      html += '<div class="zr-section"><div style="font-weight:700;margin-bottom:4px">Start a shift on ' + esc(drawer ? drawer.name : "") + '</div>' +
+        '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Count the cash you are putting in the drawer for making change (the opening float). Sales rung up while the shift is open count toward this drawer.</div>' +
+        '<div class="two-col"><div><div class="field-label">Cashier name</div>' +
+        '<input class="inline-field" id="cashStaff" placeholder="e.g. Ana" value="' + esc(last ? last.staff_name : "") + '" /></div>' +
+        '<div><div class="field-label">Opening float (₱)</div>' +
+        '<input class="inline-field" id="cashFloat" type="number" min="0" step="0.01" placeholder="0.00" /></div></div>' +
+        '<button class="addbtn" data-cash-act="start">Start shift</button>' +
+        '<div class="err" id="cashErr" style="margin-top:8px"></div></div>';
+    } else {
+      var f = shiftFigures(shift);
+      html += '<div class="zr-section">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:8px">' +
+        '<div style="font-weight:700">' + esc(shift.staff_name || "Open shift") + ' · ' + esc(drawer ? drawer.name : "") + '</div>' +
+        '<div style="font-size:11px;color:var(--muted);' + MONO + '">since ' + fmtDate(shift.opened_at) + '</div></div>' +
+        '<div class="zr-row"><span>Opening float</span><span style="' + MONO + '">' + money(f.float) + '</span></div>' +
+        '<div class="zr-row"><span>Cash sales (' + f.salesCount + ')</span><span style="' + MONO + '">' + money(f.cashSales) + '</span></div>' +
+        '<div class="zr-row"><span>Paid in</span><span style="' + MONO + ';color:var(--good)">+' + money(f.paidIn) + '</span></div>' +
+        '<div class="zr-row"><span>Paid out</span><span style="' + MONO + ';color:var(--bad)">-' + money(f.paidOut) + '</span></div>' +
+        '<div class="zr-row big"><span>Expected in drawer</span><span style="' + MONO + '">' + money(f.expected) + '</span></div></div>';
+
+      if (view === "in" || view === "out") {
+        html += '<div class="zr-section"><div style="font-weight:700;margin-bottom:8px">' +
+          (view === "in" ? "Paid in — cash added to the drawer" : "Paid out — cash taken from the drawer") + '</div>' +
+          '<div class="two-col"><div><div class="field-label">Amount (₱)</div>' +
+          '<input class="inline-field" id="cashMoveAmt" type="number" min="0.01" step="0.01" placeholder="0.00" /></div>' +
+          '<div><div class="field-label">Reason</div>' +
+          '<input class="inline-field" id="cashMoveReason" placeholder="' + (view === "in" ? "e.g. extra change from bank" : "e.g. payment-center cash-out, supplier") + '" /></div></div>' +
+          '<div style="display:flex;gap:8px"><button class="toolbtn" data-cash-act="cancel">Cancel</button>' +
+          '<button class="addbtn" data-cash-act="savemove" data-move-type="' + view + '">Save</button></div>' +
+          '<div class="err" id="cashErr" style="margin-top:8px"></div></div>';
+      } else if (view === "close") {
+        html += '<div class="zr-section"><div style="font-weight:700;margin-bottom:4px">Close shift — count the drawer</div>' +
+          '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Count all the cash in the drawer, including the float, and enter the total.</div>' +
+          '<div class="two-col"><div><div class="field-label">Counted cash (₱)</div>' +
+          '<input class="inline-field" id="cashCounted" type="number" min="0" step="0.01" placeholder="0.00" /></div>' +
+          '<div><div class="field-label">Difference</div>' +
+          '<div id="cashVarLive" style="padding:10px 0;font-size:15px">—</div></div></div>' +
+          '<div class="field-label">Note (optional)</div>' +
+          '<input class="inline-field" id="cashCloseNote" placeholder="e.g. short ₱20 — change given by mistake" />' +
+          '<div style="display:flex;gap:8px"><button class="toolbtn" data-cash-act="cancel">Cancel</button>' +
+          '<button class="addbtn" data-cash-act="saveclose">Close shift</button></div>' +
+          '<div class="err" id="cashErr" style="margin-top:8px"></div></div>';
+      } else {
+        html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">' +
+          '<button class="toolbtn" data-cash-act="in">+ Paid in</button>' +
+          '<button class="toolbtn" data-cash-act="out">− Paid out</button>' +
+          '<button class="addbtn" data-cash-act="close">Close shift</button></div>';
+        if (f.moves.length) {
+          html += '<div class="section-label">Paid in / out this shift</div><div class="zr-section">' +
+            f.moves.map(function (m) {
+              return '<div class="zr-row"><span>' + (m.type === "in" ? "＋ " : "− ") + esc(m.reason || "(no reason)") +
+                ' <span class="zr-muted" style="font-size:11px">' + fmtDate(m.created_at) + '</span></span>' +
+                '<span style="' + MONO + ';color:' + (m.type === "in" ? "var(--good)" : "var(--bad)") + '">' +
+                (m.type === "in" ? "+" : "-") + money(m.amount) + '</span></div>';
+            }).join("") + '</div>';
+        }
+      }
+    }
+
+    // recent closed shifts for this drawer
+    var closed = state.shifts.filter(function (s) {
+      return s.drawer_id === state.activeDrawerId && s.status === "closed";
+    }).slice(0, 8);
+    if (closed.length && view === "main") {
+      html += '<div class="section-label">Recent closed shifts</div><div class="zr-section">' +
+        closed.map(function (s) {
+          return '<div class="zr-row"><span>' + esc(s.staff_name || "—") +
+            ' <span class="zr-muted" style="font-size:11px">' + fmtDate(s.closed_at) + '</span></span>' +
+            '<span style="' + MONO + ';font-size:12px">' + money(s.counted_cash) + ' counted · ' + varianceHtml(Number(s.variance || 0)) + '</span></div>';
+        }).join("") + '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  async function openCash() {
+    document.getElementById("cashOverlay").classList.remove("hidden");
+    state.cashView = "main";
+    renderCash();
+    await loadCash();
+    renderCash();
+  }
+
+  function cashErr(msg) { var e = document.getElementById("cashErr"); if (e) e.textContent = msg; }
+
+  async function cashAction(act, target) {
+    var drawer = findDrawer(state.activeDrawerId);
+    var shift = activeShift();
+    if (act === "cancel") { state.cashView = "main"; renderCash(); return; }
+    if (act === "newdrawer") { state.cashView = "drawer"; renderCash(); return; }
+    if (act === "in" || act === "out" || act === "close") { state.cashView = act; renderCash(); return; }
+
+    if (act === "savedrawer") {
+      var name = document.getElementById("cashNewDrawer").value.trim();
+      if (!name) { toast("Give the drawer a name."); return; }
+      setSync("busy");
+      var r = await sb.from("cash_drawers").insert({ user_id: user.id, name: name }).select().single();
+      if (r.error) { setSync("off"); toast("Couldn't add drawer: " + r.error.message); return; }
+      setSync("ok");
+      state.activeDrawerId = r.data.id;
+      try { localStorage.setItem("inv.drawer", r.data.id); } catch (e) {}
+      state.cashView = "main";
+      await loadCash(); renderCash(); toast("Drawer added");
+      return;
+    }
+
+    if (act === "start") {
+      var staff = document.getElementById("cashStaff").value.trim();
+      var fl = Number(document.getElementById("cashFloat").value);
+      if (!staff) { cashErr("Enter the cashier's name."); return; }
+      if (!(fl >= 0) || document.getElementById("cashFloat").value === "") { cashErr("Enter the opening float (0 if none)."); return; }
+      setSync("busy");
+      var rs = await sb.from("cash_shifts").insert({
+        user_id: user.id, drawer_id: state.activeDrawerId, staff_name: staff, opening_float: +fl.toFixed(2)
+      });
+      if (rs.error) {
+        setSync("off");
+        cashErr(rs.error.code === "23505" ? "This drawer already has an open shift." : "Couldn't start shift: " + rs.error.message);
+        return;
+      }
+      setSync("ok");
+      await loadCash(); renderCash(); toast("Shift started");
+      return;
+    }
+
+    if (!shift) return;
+
+    if (act === "savemove") {
+      var type = target.getAttribute("data-move-type");
+      var amt = Number(document.getElementById("cashMoveAmt").value);
+      var reason = document.getElementById("cashMoveReason").value.trim();
+      if (!(amt > 0)) { cashErr("Enter an amount greater than 0."); return; }
+      if (!reason) { cashErr("Add a short reason so the count can be explained later."); return; }
+      setSync("busy");
+      var rm = await sb.from("cash_movements").insert({
+        user_id: user.id, shift_id: shift.id, type: type, amount: +amt.toFixed(2), reason: reason
+      });
+      if (rm.error) { setSync("off"); cashErr("Couldn't save: " + rm.error.message); return; }
+      setSync("ok");
+      state.cashView = "main";
+      await loadCash(); renderCash(); toast(type === "in" ? "Paid in recorded" : "Paid out recorded");
+      return;
+    }
+
+    if (act === "saveclose") {
+      var cv = document.getElementById("cashCounted").value;
+      if (cv === "" || !(Number(cv) >= 0)) { cashErr("Enter the counted cash."); return; }
+      var counted = Number(cv);
+      var note = document.getElementById("cashCloseNote").value.trim();
+      setSync("busy");
+      await loadCash();                       // refresh so expected includes any late sales
+      var sh2 = activeShift();
+      if (!sh2) { setSync("off"); cashErr("This shift is already closed."); renderCash(); return; }
+      var fg = shiftFigures(sh2);
+      var variance = +(counted - fg.expected).toFixed(2);
+      var rc = await sb.from("cash_shifts").update({
+        status: "closed", closed_at: new Date().toISOString(),
+        expected_cash: +fg.expected.toFixed(2), counted_cash: +counted.toFixed(2),
+        variance: variance, close_note: note
+      }).eq("id", sh2.id).eq("status", "open");
+      if (rc.error) { setSync("off"); cashErr("Couldn't close: " + rc.error.message); return; }
+      setSync("ok");
+      state.cashView = "main";
+      await loadCash(); renderCash();
+      toast(Math.abs(variance) < 0.005 ? "Shift closed — drawer balanced ✓"
+        : "Shift closed — " + (variance < 0 ? "short " : "over ") + money(Math.abs(variance)));
+      return;
+    }
+  }
+
+  /* ---- Z-report section: today's cash shifts ---- */
+  function cashSectionHtml(dayStart, dayEnd) {
+    state.zrCashLines = [];
+    if (!state.cashLoaded) return "";
+    var list = state.shifts.filter(function (s) {
+      var opened = new Date(s.opened_at);
+      if (s.status === "open") return opened <= dayEnd;
+      return opened <= dayEnd && new Date(s.closed_at) >= dayStart;
+    });
+    var rows = "";
+    if (!list.length) {
+      rows = '<div class="zr-row zr-muted"><span>No cash shifts today</span></div>';
+    } else {
+      list.forEach(function (s) {
+        var d = findDrawer(s.drawer_id);
+        var f = shiftFigures(s);
+        var label = (s.staff_name || "—") + " · " + (d ? d.name : "");
+        if (f.closed) {
+          rows += '<div class="zr-row"><span>' + esc(label) + '</span><span style="' + MONO + ';font-size:12px">' +
+            money(f.counted) + ' counted · ' + varianceHtml(f.variance) + '</span></div>';
+          state.zrCashLines.push(label, "  Expected " + money(f.expected) + "  Counted " + money(f.counted),
+            "  " + (Math.abs(f.variance) < 0.005 ? "Balanced" : (f.variance < 0 ? "SHORT " : "OVER ") + money(Math.abs(f.variance))));
+        } else {
+          rows += '<div class="zr-row"><span>' + esc(label) + ' <span class="zr-muted" style="font-size:11px">(still open)</span></span>' +
+            '<span style="' + MONO + ';font-size:12px">expected ' + money(f.expected) + '</span></div>';
+          state.zrCashLines.push(label + " (OPEN)", "  Expected " + money(f.expected) + "  - not yet counted");
+        }
+      });
+    }
+    return '<div class="zr-section"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Cash Drawers</div>' +
+      rows + '<button class="toolbtn" id="zrCashBtn" style="margin-top:10px;font-size:12px">💵 Open Cash Drawer</button></div>';
+  }
+
+  function wireBatchD() {
+    // keep the cash data loaded as soon as the app loads
+    var _origLoadAll = loadAll;
+    loadAll = async function () {
+      await _origLoadAll();
+      if (!state.cashLoaded) { try { await loadCash(); } catch (e) {} }
+    };
+
+    var ov = document.getElementById("cashOverlay");
+    document.getElementById("cashBtn").addEventListener("click", openCash);
+    document.getElementById("cashClose").addEventListener("click", function () { ov.classList.add("hidden"); });
+    ov.addEventListener("click", function (e) { if (e.target === ov) ov.classList.add("hidden"); });
+    document.getElementById("cashBody").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-cash-act]");
+      if (b) cashAction(b.getAttribute("data-cash-act"), b);
+    });
+    document.getElementById("cashBody").addEventListener("change", function (e) {
+      if (e.target.id === "cashDrawerSel") {
+        state.activeDrawerId = e.target.value;
+        try { localStorage.setItem("inv.drawer", e.target.value); } catch (er) {}
+        state.cashView = "main";
+        updateCashBtn(); renderCash();
+      }
+    });
+    document.getElementById("cashBody").addEventListener("input", function (e) {
+      if (e.target.id === "cashCounted") {
+        var sh = activeShift(); if (!sh) return;
+        var live = document.getElementById("cashVarLive");
+        if (e.target.value === "") { live.textContent = "—"; return; }
+        live.innerHTML = varianceHtml(+(Number(e.target.value) - shiftFigures(sh).expected).toFixed(2));
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !ov.classList.contains("hidden")) ov.classList.add("hidden");
+    });
+  }
+
+  /* ============================================================
+     END BATCH D
      ============================================================ */
 
   boot();
