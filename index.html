@@ -437,6 +437,46 @@
   .two-col { display:grid; gap:10px; grid-template-columns:1fr 1fr; }
   .section-label { font-size:11px; color:var(--muted); text-transform:uppercase;
     letter-spacing:.07em; font-weight:700; margin:16px 0 8px; }
+
+  /* ===== BATCH C ===== */
+  /* date-range picker row */
+  .dr-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .dr-row input[type=date] { background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    padding:7px 10px; color:var(--text); font-size:13px; font-family:inherit; }
+  .dr-row input[type=date]:focus { border-color:var(--accent); outline:none; }
+  .dr-row label { font-size:12px; color:var(--muted); }
+  /* hourly chart */
+  .hchart-wrap { background:var(--panel2); border-radius:12px; padding:14px 16px; margin-bottom:16px; }
+  .hchart-title { font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.07em; margin-bottom:10px; }
+  .hchart-bars { display:flex; align-items:flex-end; gap:3px; height:90px; overflow-x:auto; }
+  .hchart-col { display:flex; flex-direction:column; align-items:center; gap:3px; min-width:22px; flex:1; }
+  .hchart-bar { background:var(--accent); border-radius:4px 4px 0 0; width:100%; min-height:2px;
+    transition:height .2s; }
+  .hchart-bar.empty { background:var(--line); }
+  .hchart-lbl { font-size:9px; color:var(--muted); font-family:'Spline Sans Mono',monospace; }
+  /* slow-mover / reorder rows */
+  .slow-row { display:flex; align-items:center; gap:10px; padding:10px 14px;
+    border-bottom:1px solid var(--line); }
+  .slow-row:last-child { border-bottom:none; }
+  .slow-badge { font-size:10px; font-weight:700; border-radius:6px; padding:3px 7px; white-space:nowrap; }
+  .slow-badge.zero { background:var(--bad)22; color:var(--bad); }
+  .slow-badge.low  { background:var(--warn)22; color:var(--warn); }
+  /* Z-report */
+  .zr-section { background:var(--panel2); border-radius:12px; padding:12px 14px; margin-bottom:12px; }
+  .zr-row { display:flex; justify-content:space-between; align-items:center;
+    padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .zr-row:last-child { border-bottom:none; }
+  .zr-row.big { font-weight:700; font-size:15px; color:var(--accent); }
+  .zr-muted { color:var(--muted); }
+  /* void badge on sales list */
+  .void-badge { font-size:10px; font-weight:700; background:var(--bad)22; color:var(--bad);
+    border-radius:6px; padding:2px 7px; margin-left:6px; }
+  /* reports sub-tabs */
+  .rtab-bar { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  .rtab { background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+    padding:6px 14px; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer; }
+  .rtab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
 </style>
 </head>
 <body>
@@ -508,6 +548,8 @@
       </button>
       <button class="toolbtn" id="settingsBtn">⚙ Settings</button>
       <button class="toolbtn" id="salesBtn">🧾 Sales</button>
+      <button class="toolbtn" id="zreportBtn">🔒 Z-Report</button>
+      <button class="toolbtn" id="reportsBtn">📈 Reports</button>
       <button class="toolbtn" id="dashboardBtn">📊 Dashboard</button>
       <button class="toolbtn" id="historyBtn">🕓 History</button>
       <button class="toolbtn" id="exportBtn">⬇ Export</button>
@@ -785,6 +827,42 @@
       <span class="x" id="poFormClose">✕</span>
     </div>
     <div class="mbody padded" id="poFormBody"></div>
+  </div>
+</div>
+
+<!-- ======= Z-REPORT MODAL ======= -->
+<div class="overlay hidden" id="zreportOverlay">
+  <div class="modal">
+    <div class="mhead">
+      <span style="color:var(--warn);font-size:18px;">🔒</span>
+      <span class="mtitle">Z-Report · End of Day</span>
+      <span class="x" id="zreportClose">✕</span>
+    </div>
+    <div class="mbody padded" id="zreportBody">
+      <div class="empty" style="padding:40px">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ======= REPORTS MODAL (slow movers + hourly chart + CSV export) ======= -->
+<div class="overlay hidden" id="reportsOverlay">
+  <div class="modal wide">
+    <div class="mhead">
+      <span style="color:var(--accent);font-size:18px;">📈</span>
+      <span class="mtitle">Reports</span>
+      <span class="x" id="reportsClose">✕</span>
+    </div>
+    <div class="mbody padded">
+      <div class="rtab-bar">
+        <button class="rtab active" data-rtab="hourly">Hourly Sales</button>
+        <button class="rtab" data-rtab="slow">Slow Movers</button>
+        <button class="rtab" data-rtab="reorder">Reorder Alerts</button>
+        <button class="rtab" data-rtab="export">CSV Export</button>
+      </div>
+      <div id="reportsBody">
+        <div class="empty" style="padding:40px">Loading…</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2473,6 +2551,8 @@
     installScanner();
     // Batch B
     wireBatchB();
+    // Batch C
+    wireBatchC();
     // config save
     document.getElementById("cfgSaveBtn").addEventListener("click", function () {
       var url = document.getElementById("cfgUrl").value.trim();
@@ -3347,6 +3427,764 @@
 
   /* ============================================================
      END BATCH B
+     ============================================================ */
+
+  /* ============================================================
+     BATCH C — Z-REPORT · REPORTS · VOIDS · DATE-RANGE FILTER
+     ============================================================ */
+
+  /* ---- state additions ---- */
+  state.dashFrom = null;   // custom date-range ISO strings
+  state.dashTo   = null;
+  state.reportsTab = "hourly";
+
+  /* ---- date helpers ---- */
+  function dateOnly(iso) { return (iso || "").slice(0, 10); }
+
+  function periodBounds(period, fromStr, toStr) {
+    var now = new Date();
+    var y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    if (period === "custom" && fromStr && toStr) {
+      var f = new Date(fromStr + "T00:00:00");
+      var t = new Date(toStr  + "T23:59:59.999");
+      return { from: f, to: t };
+    }
+    var from, to;
+    if (period === "today") {
+      from = new Date(y, m, d);
+      to   = new Date(y, m, d, 23, 59, 59, 999);
+    } else if (period === "this-week") {
+      var dow = now.getDay();
+      from = new Date(y, m, d - dow);
+      to   = new Date(y, m, d - dow + 6, 23, 59, 59, 999);
+    } else if (period === "last-week") {
+      var dow2 = now.getDay();
+      from = new Date(y, m, d - dow2 - 7);
+      to   = new Date(y, m, d - dow2 - 1, 23, 59, 59, 999);
+    } else if (period === "last-month") {
+      from = new Date(y, m - 1, 1);
+      to   = new Date(y, m, 0, 23, 59, 59, 999);
+    } else { // this-month (default)
+      from = new Date(y, m, 1);
+      to   = new Date(y, m + 1, 0, 23, 59, 59, 999);
+    }
+    return { from: from, to: to };
+  }
+
+  function salesInRange(fromDate, toDate) {
+    return state.sales.filter(function (s) {
+      if (s.status === "void") return false;
+      var t = new Date(s.created_at);
+      return t >= fromDate && t <= toDate;
+    });
+  }
+
+  /* ================================================================
+     Z-REPORT
+     ================================================================ */
+
+  function openZReport() {
+    document.getElementById("zreportOverlay").classList.remove("hidden");
+    renderZReport();
+  }
+
+  function renderZReport() {
+    var el = document.getElementById("zreportBody");
+    if (!state.salesLoaded) {
+      el.innerHTML = '<div class="empty" style="padding:40px">Loading sales…</div>';
+      loadSales().then(renderZReport);
+      return;
+    }
+
+    // Today's completed sales
+    var now = new Date();
+    var y = now.getFullYear(), mo = now.getMonth(), d = now.getDate();
+    var dayStart = new Date(y, mo, d);
+    var dayEnd   = new Date(y, mo, d, 23, 59, 59, 999);
+    var daySales = state.sales.filter(function (s) {
+      return s.status !== "void" && new Date(s.created_at) >= dayStart && new Date(s.created_at) <= dayEnd;
+    });
+
+    var totalSales = daySales.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
+    var totalDisc  = daySales.reduce(function (a, s) { return a + Number(s.discount || 0); }, 0);
+    var txCount    = daySales.length;
+    var itemCount  = daySales.reduce(function (a, s) {
+      return a + (s.sale_items || []).reduce(function (b, i) { return b + Number(i.quantity || 0); }, 0);
+    }, 0);
+
+    // Payment method breakdown
+    var pmMap = {};
+    daySales.forEach(function (s) {
+      (s.payments || []).forEach(function (p) {
+        var key = (p.method || "cash").toUpperCase();
+        pmMap[key] = (pmMap[key] || 0) + Number(p.amount || 0);
+      });
+    });
+    var pmRows = Object.keys(pmMap).map(function (k) {
+      return '<div class="zr-row"><span>' + esc(k) + '</span><span style="font-family:\'Spline Sans Mono\',monospace">' + money(pmMap[k]) + '</span></div>';
+    }).join("") || '<div class="zr-row zr-muted"><span>No payments</span></div>';
+
+    // Gross profit estimate
+    var grossProfit = daySales.reduce(function (a, s) {
+      return a + (s.sale_items || []).reduce(function (b, i) {
+        var profit = (Number(i.unit_price || 0) - Number(i.unit_cost || 0)) * Number(i.quantity || 0);
+        return b + (isNaN(profit) ? 0 : profit);
+      }, 0);
+    }, 0);
+
+    var todayStr = now.toLocaleDateString("en-PH", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+
+    el.innerHTML =
+      '<div style="font-size:13px;color:var(--muted);margin-bottom:14px">' + esc(todayStr) + '</div>' +
+
+      '<div class="zr-section">' +
+        '<div class="zr-row big"><span>Gross Sales</span>' +
+          '<span style="font-family:\'Spline Sans Mono\',monospace">' + money(totalSales) + '</span></div>' +
+        '<div class="zr-row"><span>Discounts Given</span>' +
+          '<span style="font-family:\'Spline Sans Mono\',monospace;color:var(--bad)">-' + money(totalDisc) + '</span></div>' +
+        '<div class="zr-row"><span>Net Sales</span>' +
+          '<span style="font-family:\'Spline Sans Mono\',monospace">' + money(totalSales - totalDisc) + '</span></div>' +
+        '<div class="zr-row"><span>Est. Gross Profit</span>' +
+          '<span style="font-family:\'Spline Sans Mono\',monospace;color:var(--good)">' + money(grossProfit) + '</span></div>' +
+      '</div>' +
+
+      '<div class="zr-section">' +
+        '<div class="zr-row"><span>Transactions</span><span style="font-family:\'Spline Sans Mono\',monospace">' + txCount + '</span></div>' +
+        '<div class="zr-row"><span>Items Sold</span><span style="font-family:\'Spline Sans Mono\',monospace">' + itemCount + '</span></div>' +
+        (txCount > 0 ? '<div class="zr-row"><span>Avg Basket</span><span style="font-family:\'Spline Sans Mono\',monospace">' + money(totalSales / txCount) + '</span></div>' : '') +
+      '</div>' +
+
+      '<div class="zr-section">' +
+        '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Payment Breakdown</div>' +
+        pmRows +
+      '</div>' +
+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">' +
+        '<button class="toolbtn" id="zrPrintBtn">🖨 Print Z-Report</button>' +
+        '<button class="toolbtn" id="zrCsvBtn">⬇ Save as CSV</button>' +
+      '</div>' +
+
+      (txCount === 0 ? '<div style="margin-top:14px;font-size:13px;color:var(--muted)">No sales recorded today yet.</div>' : '');
+
+    document.getElementById("zrPrintBtn").addEventListener("click", function () { printZReport(daySales, todayStr, totalSales, totalDisc, txCount, itemCount, grossProfit, pmMap); });
+    document.getElementById("zrCsvBtn").addEventListener("click", function () { exportZReportCSV(daySales, todayStr); });
+  }
+
+  function printZReport(daySales, todayStr, total, disc, txCount, items, profit, pmMap) {
+    var s = settings || {};
+    var lines = [
+      (s.shopName || "Shop"),
+      todayStr,
+      "--- Z-REPORT / END OF DAY ---",
+      "",
+      "Gross Sales:    " + money(total),
+      "Discounts:     -" + money(disc),
+      "Net Sales:      " + money(total - disc),
+      "Est. Profit:    " + money(profit),
+      "",
+      "Transactions:   " + txCount,
+      "Items Sold:     " + items,
+      "",
+      "-- Payment Breakdown --"
+    ];
+    Object.keys(pmMap).forEach(function (k) { lines.push(k + ": " + money(pmMap[k])); });
+    lines.push("", "Printed: " + new Date().toLocaleString("en-PH"));
+
+    var w = window.open("", "_blank", "width=400,height=600");
+    if (!w) { toast("Allow pop-ups to print"); return; }
+    w.document.write('<pre style="font-family:monospace;font-size:13px;white-space:pre-wrap;padding:16px">' + lines.join("\n") + '</pre>');
+    w.document.close();
+    w.print();
+  }
+
+  function exportZReportCSV(daySales, todayStr) {
+    var rows = [["Date","Sale ID","Time","Items","Subtotal","Discount","Total","Payment Methods"]];
+    daySales.forEach(function (s) {
+      var pm = (s.payments || []).map(function (p) { return (p.method || "cash") + ":" + money(p.amount); }).join("; ");
+      rows.push([
+        dateOnly(s.created_at),
+        s.id,
+        new Date(s.created_at).toLocaleTimeString("en-PH"),
+        (s.sale_items || []).reduce(function (a, i) { return a + Number(i.quantity || 0); }, 0),
+        s.subtotal || s.total,
+        s.discount || 0,
+        s.total,
+        pm
+      ]);
+    });
+    downloadCSV("z-report-" + dateOnly(new Date().toISOString()) + ".csv", rows);
+  }
+
+  /* ================================================================
+     REPORTS MODAL
+     ================================================================ */
+
+  function openReports() {
+    document.getElementById("reportsOverlay").classList.remove("hidden");
+    renderReportsTab(state.reportsTab);
+  }
+
+  function renderReportsTab(tab) {
+    state.reportsTab = tab;
+    document.querySelectorAll(".rtab").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-rtab") === tab);
+    });
+    var el = document.getElementById("reportsBody");
+    if (tab === "hourly")   renderHourlyChart(el);
+    if (tab === "slow")     renderSlowMovers(el);
+    if (tab === "reorder")  renderReorderAlerts(el);
+    if (tab === "export")   renderCSVExport(el);
+  }
+
+  /* ---- hourly sales chart ---- */
+  function renderHourlyChart(el) {
+    if (!state.salesLoaded) {
+      el.innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
+      loadSales().then(function () { renderHourlyChart(el); });
+      return;
+    }
+    // build date-range controls
+    var bounds = periodBounds(state.dashboardPeriod, state.dashFrom, state.dashTo);
+    var periodSales = salesInRange(bounds.from, bounds.to);
+
+    // tally by hour 0-23
+    var byHour = new Array(24).fill(0);
+    periodSales.forEach(function (s) {
+      var h = new Date(s.created_at).getHours();
+      byHour[h] += Number(s.total || 0);
+    });
+    var maxVal = Math.max.apply(null, byHour) || 1;
+
+    var bars = byHour.map(function (v, h) {
+      var pct = Math.round((v / maxVal) * 100);
+      var lbl = (h % 3 === 0) ? (h < 12 ? h + "a" : (h === 12 ? "12p" : (h-12) + "p")) : "";
+      return '<div class="hchart-col">' +
+        '<div class="hchart-bar' + (v === 0 ? " empty" : "") + '" style="height:' + Math.max(pct, 2) + '%;" title="' + fmtDateOnly(new Date(2000,0,1,h)) + ': ' + money(v) + '"></div>' +
+        '<div class="hchart-lbl">' + esc(lbl) + '</div>' +
+        '</div>';
+    }).join("");
+
+    var periodLabel = state.dashboardPeriod === "custom"
+      ? (state.dashFrom + " → " + state.dashTo)
+      : state.dashboardPeriod.replace(/-/g," ");
+
+    el.innerHTML =
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Period: <strong style="color:var(--text)">' + esc(periodLabel) + '</strong> · ' + periodSales.length + ' transactions</div>' +
+      '<div class="hchart-wrap">' +
+        '<div class="hchart-title">Sales by Hour</div>' +
+        '<div class="hchart-bars" style="height:100px">' + bars + '</div>' +
+      '</div>' +
+      renderHourlyTable(byHour);
+  }
+
+  function renderHourlyTable(byHour) {
+    // top 5 hours
+    var ranked = byHour.map(function (v, h) { return { h: h, v: v }; })
+      .filter(function (x) { return x.v > 0; })
+      .sort(function (a, b) { return b.v - a.v; })
+      .slice(0, 5);
+    if (!ranked.length) return '<div class="empty" style="padding:20px">No sales in this period.</div>';
+    var rows = ranked.map(function (x) {
+      var label = x.h < 12 ? x.h + ":00 AM" : (x.h === 12 ? "12:00 PM" : (x.h-12) + ":00 PM");
+      return '<div class="zr-row"><span>' + esc(label) + '</span>' +
+        '<span style="font-family:\'Spline Sans Mono\',monospace">' + money(x.v) + '</span></div>';
+    }).join("");
+    return '<div class="zr-section"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Top Hours</div>' + rows + '</div>';
+  }
+
+  /* ---- slow movers ---- */
+  function renderSlowMovers(el) {
+    if (!state.salesLoaded) {
+      el.innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
+      loadSales().then(function () { renderSlowMovers(el); });
+      return;
+    }
+    var bounds = periodBounds(state.dashboardPeriod, state.dashFrom, state.dashTo);
+    var periodSales = salesInRange(bounds.from, bounds.to);
+
+    // count units sold per product
+    var soldMap = {};
+    periodSales.forEach(function (s) {
+      (s.sale_items || []).forEach(function (i) {
+        if (i.product_id) soldMap[i.product_id] = (soldMap[i.product_id] || 0) + Number(i.quantity || 0);
+      });
+    });
+
+    var rows = state.products
+      .filter(function (p) { return p.quantity > 0; })
+      .map(function (p) { return { p: p, sold: soldMap[p.id] || 0 }; })
+      .sort(function (a, b) { return a.sold - b.sold || b.p.quantity - a.p.quantity; })
+      .slice(0, 20);
+
+    if (!rows.length) {
+      el.innerHTML = '<div class="empty" style="padding:40px">No products in inventory.</div>'; return;
+    }
+
+    var periodLabel = state.dashboardPeriod === "custom"
+      ? (state.dashFrom + " → " + state.dashTo)
+      : state.dashboardPeriod.replace(/-/g," ");
+
+    el.innerHTML =
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Showing products with lowest sales — period: <strong style="color:var(--text)">' + esc(periodLabel) + '</strong></div>' +
+      '<div style="background:var(--panel2);border-radius:12px;overflow:hidden">' +
+      rows.map(function (x) {
+        var badge = x.sold === 0
+          ? '<span class="slow-badge zero">0 sold</span>'
+          : '<span class="slow-badge low">' + x.sold + ' sold</span>';
+        return '<div class="slow-row">' +
+          '<div style="flex:1"><div style="font-weight:600;font-size:13px">' + esc(x.p.name) + '</div>' +
+          '<div style="font-size:11px;color:var(--muted)">' +
+            (x.p.category ? esc(x.p.category) + ' · ' : '') +
+            'Stock: ' + x.p.quantity +
+          '</div></div>' +
+          badge +
+          '<div style="font-family:\'Spline Sans Mono\',monospace;font-size:13px;color:var(--accent);min-width:70px;text-align:right">' + money(x.p.price) + '</div>' +
+          '</div>';
+      }).join("") +
+      '</div>';
+  }
+
+  /* ---- reorder alerts ---- */
+  function renderReorderAlerts(el) {
+    var alerts = state.products.filter(function (p) {
+      return p.low_stock_alert != null && Number(p.quantity) <= Number(p.low_stock_alert);
+    }).sort(function (a, b) { return a.quantity - b.quantity; });
+
+    if (!alerts.length) {
+      el.innerHTML = '<div class="empty" style="padding:48px"><div class="big">✅</div><div>No reorder alerts — all products are above their threshold.</div></div>';
+      return;
+    }
+
+    el.innerHTML =
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">' + alerts.length + ' product(s) at or below reorder level</div>' +
+      '<div style="background:var(--panel2);border-radius:12px;overflow:hidden">' +
+      alerts.map(function (p) {
+        var isCritical = p.quantity === 0;
+        return '<div class="slow-row">' +
+          '<div style="flex:1">' +
+            '<div style="font-weight:600;font-size:13px">' + esc(p.name) + '</div>' +
+            '<div style="font-size:11px;color:var(--muted)">Reorder at: ' + Number(p.low_stock_alert) + '</div>' +
+          '</div>' +
+          '<span class="slow-badge ' + (isCritical ? "zero" : "low") + '">' +
+            (isCritical ? "OUT OF STOCK" : "Stock: " + p.quantity) +
+          '</span>' +
+        '</div>';
+      }).join("") +
+      '</div>';
+  }
+
+  /* ---- CSV export panel ---- */
+  function renderCSVExport(el) {
+    el.innerHTML =
+      '<div style="font-size:13px;color:var(--muted);margin-bottom:16px">Export your sales data as a spreadsheet-friendly CSV file.</div>' +
+      '<div class="dr-row" style="margin-bottom:20px">' +
+        '<label>From <input type="date" id="csvFrom" /></label>' +
+        '<label>To &nbsp;&nbsp;<input type="date" id="csvTo" /></label>' +
+        '<button class="toolbtn" id="csvSetToday">Today</button>' +
+        '<button class="toolbtn" id="csvSetMonth">This Month</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="addbtn" id="csvDlSales">⬇ Sales Summary CSV</button>' +
+        '<button class="addbtn" id="csvDlLineItems">⬇ Line-Item Detail CSV</button>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-top:12px">Line-item CSV includes one row per product sold, suitable for COGS analysis.</div>';
+
+    // default dates: this month
+    var now = new Date();
+    var y = now.getFullYear(), m = now.getMonth();
+    var mFirst = new Date(y, m, 1).toISOString().slice(0,10);
+    var mLast  = new Date(y, m+1, 0).toISOString().slice(0,10);
+    document.getElementById("csvFrom").value = mFirst;
+    document.getElementById("csvTo").value   = mLast;
+
+    document.getElementById("csvSetToday").addEventListener("click", function () {
+      var t = now.toISOString().slice(0,10);
+      document.getElementById("csvFrom").value = t;
+      document.getElementById("csvTo").value   = t;
+    });
+    document.getElementById("csvSetMonth").addEventListener("click", function () {
+      document.getElementById("csvFrom").value = mFirst;
+      document.getElementById("csvTo").value   = mLast;
+    });
+    document.getElementById("csvDlSales").addEventListener("click", function () {
+      exportSalesCSV(document.getElementById("csvFrom").value, document.getElementById("csvTo").value, false);
+    });
+    document.getElementById("csvDlLineItems").addEventListener("click", function () {
+      exportSalesCSV(document.getElementById("csvFrom").value, document.getElementById("csvTo").value, true);
+    });
+  }
+
+  /* ---- CSV helpers ---- */
+  function csvEsc(v) {
+    var s = String(v == null ? "" : v);
+    if (s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0) {
+      s = '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function downloadCSV(filename, rows) {
+    var csv = rows.map(function (r) { return r.map(csvEsc).join(","); }).join("\r\n");
+    var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function exportSalesCSV(fromStr, toStr, lineItems) {
+    if (!state.salesLoaded) { toast("Sales not loaded yet, please wait."); return; }
+    var from = new Date(fromStr + "T00:00:00");
+    var to   = new Date(toStr   + "T23:59:59.999");
+    var sales = state.sales.filter(function (s) {
+      var t = new Date(s.created_at);
+      return t >= from && t <= to;
+    });
+    if (!sales.length) { toast("No sales in that date range."); return; }
+
+    if (!lineItems) {
+      var rows = [["Date","Time","Sale ID","Status","Items","Subtotal","Discount","Total","Payment Methods","Change"]];
+      sales.forEach(function (s) {
+        var pm = (s.payments || []).map(function (p) { return (p.method || "cash") + ":" + Number(p.amount || 0).toFixed(2); }).join("; ");
+        var items = (s.sale_items || []).reduce(function (a, i) { return a + Number(i.quantity || 0); }, 0);
+        rows.push([
+          dateOnly(s.created_at),
+          new Date(s.created_at).toLocaleTimeString("en-PH"),
+          s.id, s.status || "completed", items,
+          Number(s.subtotal || s.total || 0).toFixed(2),
+          Number(s.discount || 0).toFixed(2),
+          Number(s.total || 0).toFixed(2),
+          pm,
+          Number(s.change_given || 0).toFixed(2)
+        ]);
+      });
+      downloadCSV("sales-" + fromStr + "-to-" + toStr + ".csv", rows);
+    } else {
+      var liRows = [["Date","Time","Sale ID","Status","Product","SKU","Category","Qty","Unit Price","Unit Cost","Line Discount","Line Total"]];
+      sales.forEach(function (s) {
+        var dt = dateOnly(s.created_at);
+        var tm = new Date(s.created_at).toLocaleTimeString("en-PH");
+        var st = s.status || "completed";
+        (s.sale_items || []).forEach(function (i) {
+          liRows.push([
+            dt, tm, s.id, st,
+            i.name || "", i.sku || "", i.category || "",
+            Number(i.quantity || 0),
+            Number(i.unit_price || 0).toFixed(2),
+            Number(i.unit_cost  || 0).toFixed(2),
+            Number(i.line_discount || 0).toFixed(2),
+            Number(i.line_total || 0).toFixed(2)
+          ]);
+        });
+      });
+      downloadCSV("line-items-" + fromStr + "-to-" + toStr + ".csv", liRows);
+    }
+    toast("CSV downloaded");
+  }
+
+  /* ================================================================
+     SALE VOIDS / RETURNS
+     ================================================================ */
+
+  async function voidSale(saleId) {
+    var sale = state.sales.find(function (s) { return s.id === saleId; });
+    if (!sale) return;
+    if (sale.status === "void") { toast("Already voided."); return; }
+
+    if (!confirm("Void this sale?\n\nThis will restore stock for each item and mark the sale as voided. This cannot be undone.")) return;
+
+    setSync("busy");
+    // restore stock for each line item
+    var errors = [];
+    var items = sale.sale_items || [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (!item.product_id) continue;
+      var p = findProduct(item.product_id);
+      var restoredQty = (p ? p.quantity : 0) + Number(item.quantity || 0);
+      var upRes = await sb.from("products")
+        .update({ quantity: restoredQty })
+        .eq("id", item.product_id)
+        .eq("user_id", user.id);
+      if (upRes.error) { errors.push(item.name || item.product_id); continue; }
+
+      // log history entry for void
+      await logEntry({
+        type: "add",
+        name: item.name || "Unknown",
+        detail: "Void of sale " + saleId.slice(0, 8) + "… · +" + Number(item.quantity) + " returned",
+        delta: Number(item.quantity || 0),
+        price_snapshot: item.unit_price,
+        cost_snapshot: item.unit_cost
+      });
+    }
+
+    // mark sale as void
+    var voidRes = await sb.from("sales").update({ status: "void" }).eq("id", saleId);
+    if (voidRes.error) {
+      setSync("off");
+      toast("Could not mark sale as voided: " + voidRes.error.message);
+      return;
+    }
+
+    setSync("ok");
+    // update local state
+    var idx = state.sales.findIndex(function (s) { return s.id === saleId; });
+    if (idx >= 0) state.sales[idx].status = "void";
+    // reload products so quantities are fresh
+    await loadAll();
+
+    if (errors.length) {
+      toast("Voided with " + errors.length + " stock-restore error(s)");
+    } else {
+      toast("✅ Sale voided — stock restored");
+    }
+
+    // re-render sales list if open
+    if (!document.getElementById("salesOverlay").classList.contains("hidden")) {
+      renderSalesListC();
+    }
+  }
+
+  /* Re-render the sales list with void buttons injected.
+     We patch renderSales (defined in the main block) by wrapping it. */
+  function renderSalesListC() {
+    // Delegate to the existing renderSales function, then patch in void buttons
+    renderSalesList();
+    // inject "Void" buttons next to each completed sale row
+    document.querySelectorAll(".sales-row").forEach(function (row) {
+      var sid = row.getAttribute("data-sale-id");
+      if (!sid) return;
+      var sale = state.sales.find(function (s) { return s.id === sid; });
+      if (!sale) return;
+      if (sale.status === "void") {
+        // add void badge if not already there
+        if (!row.querySelector(".void-badge")) {
+          var titleEl = row.querySelector(".sn");
+          if (titleEl) titleEl.insertAdjacentHTML("afterend", '<span class="void-badge">VOID</span>');
+          row.style.opacity = "0.5";
+        }
+        return;
+      }
+      // add void button
+      if (!row.querySelector("[data-void-sale]")) {
+        var capturedSid = sid;
+        var voidBtn = document.createElement("button");
+        voidBtn.className = "ibtn";
+        voidBtn.setAttribute("data-void-sale", capturedSid);
+        voidBtn.style.color = "var(--bad)";
+        voidBtn.title = "Void this sale";
+        voidBtn.textContent = "🚫";
+        row.appendChild(voidBtn);
+        voidBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          voidSale(capturedSid);
+        });
+      }
+    });
+  }
+
+  /* ================================================================
+     DATE-RANGE FILTER FOR DASHBOARD
+     — patches renderDashboard to support a "custom" period
+     ================================================================ */
+
+  var _origRenderDashboard = null;
+
+  function patchDashboard() {
+    if (_origRenderDashboard) return; // already patched
+    _origRenderDashboard = renderDashboard;
+
+    renderDashboard = function () {
+      // If custom period, use our own computeDashboard with custom bounds
+      if (state.dashboardPeriod === "custom" && state.dashFrom && state.dashTo) {
+        renderDashboardCustom();
+        return;
+      }
+      _origRenderDashboard();
+      appendDateRangeRow();
+    };
+  }
+
+  function appendDateRangeRow() {
+    var body = document.getElementById("dashboardBody");
+    if (!body) return;
+    if (body.querySelector("#dashDrRow")) return; // already present
+
+    var drHtml =
+      '<div class="dr-row" id="dashDrRow" style="margin-top:8px">' +
+        '<span style="font-size:12px;color:var(--muted)">Custom range:</span>' +
+        '<label style="font-size:12px;color:var(--muted)">From <input type="date" id="dashFromDate" /></label>' +
+        '<label style="font-size:12px;color:var(--muted)">To &nbsp;&nbsp;<input type="date" id="dashToDate" /></label>' +
+        '<button class="toolbtn" style="font-size:11px;padding:5px 10px" id="dashApplyDr">Apply</button>' +
+      '</div>';
+    body.insertAdjacentHTML("afterbegin", drHtml);
+
+    // pre-fill with current custom range if set
+    if (state.dashFrom) document.getElementById("dashFromDate").value = state.dashFrom;
+    if (state.dashTo)   document.getElementById("dashToDate").value   = state.dashTo;
+
+    document.getElementById("dashApplyDr").addEventListener("click", function () {
+      var f = document.getElementById("dashFromDate").value;
+      var t = document.getElementById("dashToDate").value;
+      if (!f || !t) { toast("Pick both dates"); return; }
+      if (f > t) { toast("From must be ≤ To"); return; }
+      state.dashFrom = f;
+      state.dashTo   = t;
+      state.dashboardPeriod = "custom";
+      renderDashboard();
+    });
+  }
+
+  function renderDashboardCustom() {
+    // compute with our custom bounds
+    var bounds = periodBounds("custom", state.dashFrom, state.dashTo);
+    var sales = salesInRange(bounds.from, bounds.to);
+
+    // product map for cost lookups
+    var prodMap = {};
+    state.products.forEach(function (p) { prodMap[p.id] = p; });
+
+    var revenue = 0, cogs = 0, unitsSold = 0;
+    var moverMap = {};
+    sales.forEach(function (s) {
+      revenue += Number(s.total || 0);
+      (s.sale_items || []).forEach(function (i) {
+        var qty = Number(i.quantity || 0);
+        var price = Number(i.unit_price || 0);
+        var cost = Number(i.unit_cost || 0);
+        var lt = Number(i.line_total != null ? i.line_total : qty * price);
+        unitsSold += qty;
+        cogs += cost * qty;
+        var key = i.product_id || i.name;
+        if (!moverMap[key]) moverMap[key] = { name: i.name, units: 0, revenue: 0, profit: 0 };
+        moverMap[key].units   += qty;
+        moverMap[key].revenue += lt;
+        moverMap[key].profit  += (price - cost) * qty;
+      });
+    });
+    var profit = revenue - cogs;
+    var movers = Object.values(moverMap).sort(function (a, b) { return b.revenue - a.revenue; }).slice(0, 10);
+
+    function cardHtml(label, val, color, sub) {
+      return '<div class="dash-card"><div class="lbl">' + label + '</div>' +
+        '<div class="val" style="color:' + color + '">' + val + '</div>' +
+        (sub ? '<div class="sub">' + sub + '</div>' : '') + '</div>';
+    }
+
+    var html =
+      '<div class="dr-row" id="dashDrRow" style="margin-top:0">' +
+        '<span style="font-size:12px;color:var(--muted)">Custom range:</span>' +
+        '<label style="font-size:12px;color:var(--muted)">From <input type="date" id="dashFromDate" value="' + esc(state.dashFrom) + '" /></label>' +
+        '<label style="font-size:12px;color:var(--muted)">To &nbsp;&nbsp;<input type="date" id="dashToDate" value="' + esc(state.dashTo)   + '" /></label>' +
+        '<button class="toolbtn" style="font-size:11px;padding:5px 10px" id="dashApplyDr">Apply</button>' +
+      '</div>' +
+      '<div class="tabbar">' +
+        ['this-week','last-week','this-month','last-month'].map(function (id) {
+          var lbl = id.replace(/-/g," ").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+          return '<button class="tab" data-period="' + id + '">' + lbl + '</button>';
+        }).join("") +
+      '</div>' +
+      '<div class="dash-period">' + esc(state.dashFrom) + ' → ' + esc(state.dashTo) + ' · ' + sales.length + ' sales</div>' +
+      '<div class="dash-cards">' +
+        cardHtml("Items Sold", unitsSold.toLocaleString(), "var(--text)", "") +
+        cardHtml("Revenue", money(revenue), "var(--accent)", "") +
+        cardHtml("Cost of Goods", money(cogs), "var(--text)", "") +
+        cardHtml("Gross Profit", money(profit), profit >= 0 ? "var(--good)" : "var(--bad)",
+          revenue > 0 ? (profit / revenue * 100).toFixed(1) + "% margin" : "") +
+      '</div>' +
+      '<div class="dash-section"><h3>Top Movers</h3>';
+
+    if (movers.length === 0) {
+      html += '<div class="empty" style="padding:30px 0">No sales in this range.</div>';
+    } else {
+      html += '<div class="mover head"><span>Product</span><span>Units</span>' +
+        '<span style="text-align:right">Revenue</span><span style="text-align:right">Profit</span></div>';
+      movers.forEach(function (m) {
+        html += '<div class="mover"><span class="mn">' + esc(m.name) + '</span>' +
+          '<span class="mc">' + m.units + '</span>' +
+          '<span class="mr">' + money(m.revenue) + '</span>' +
+          '<span class="mp" style="color:' + (m.profit>=0?"var(--good)":"var(--bad)") + '">' + money(m.profit) + '</span></div>';
+      });
+    }
+    html += '</div>';
+
+    document.getElementById("dashboardBody").innerHTML = html;
+
+    // wire Apply and period tabs
+    document.getElementById("dashApplyDr").addEventListener("click", function () {
+      var f = document.getElementById("dashFromDate").value;
+      var t = document.getElementById("dashToDate").value;
+      if (!f || !t) { toast("Pick both dates"); return; }
+      if (f > t) { toast("From must be ≤ To"); return; }
+      state.dashFrom = f; state.dashTo = t; state.dashboardPeriod = "custom";
+      renderDashboard();
+    });
+    document.querySelectorAll(".tabbar .tab[data-period]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.dashboardPeriod = b.getAttribute("data-period");
+        state.dashFrom = null; state.dashTo = null;
+        renderDashboard();
+      });
+    });
+  }
+
+  /* ================================================================
+     WIRE BATCH C
+     ================================================================ */
+
+  function wireBatchC() {
+    /* Z-Report button */
+    document.getElementById("zreportBtn").addEventListener("click", openZReport);
+    document.getElementById("zreportClose").addEventListener("click", function () {
+      document.getElementById("zreportOverlay").classList.add("hidden");
+    });
+    document.getElementById("zreportOverlay").addEventListener("click", function (e) {
+      if (e.target === document.getElementById("zreportOverlay"))
+        document.getElementById("zreportOverlay").classList.add("hidden");
+    });
+
+    /* Reports button */
+    document.getElementById("reportsBtn").addEventListener("click", function () {
+      openReports();
+    });
+    document.getElementById("reportsClose").addEventListener("click", function () {
+      document.getElementById("reportsOverlay").classList.add("hidden");
+    });
+    document.getElementById("reportsOverlay").addEventListener("click", function (e) {
+      if (e.target === document.getElementById("reportsOverlay"))
+        document.getElementById("reportsOverlay").classList.add("hidden");
+    });
+    document.getElementById("reportsOverlay").addEventListener("click", function (e) {
+      var tab = e.target.closest("[data-rtab]");
+      if (tab) renderReportsTab(tab.getAttribute("data-rtab"));
+    });
+
+    /* Patch renderDashboard to support custom date range */
+    patchDashboard();
+
+    /* Extend sales list to support voids — patch salesBtn click */
+    var origSalesBtn = document.getElementById("salesBtn");
+    if (origSalesBtn) {
+      origSalesBtn.addEventListener("click", function () {
+        setTimeout(renderSalesListC, 80);
+      });
+    }
+
+    /* Extend Escape key handler */
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      if (!document.getElementById("zreportOverlay").classList.contains("hidden")) {
+        document.getElementById("zreportOverlay").classList.add("hidden");
+      }
+      if (!document.getElementById("reportsOverlay").classList.contains("hidden")) {
+        document.getElementById("reportsOverlay").classList.add("hidden");
+      }
+    });
+  }
+
+  /* ============================================================
+     END BATCH C
      ============================================================ */
 
   boot();
