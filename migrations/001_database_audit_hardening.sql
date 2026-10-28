@@ -1,4 +1,4 @@
--- 001 Database audit hardening (NOT YET APPLIED)
+-- 001 Database audit hardening — APPLIED 2026-10-28 (via SQL tool; policies changed with ALTER POLICY instead of drop/create)
 -- Safe on current data: audit found 0 orphans, 0 total mismatches, 0 negative stock.
 
 -- 1. Row-level security: signed-in users only, auth.uid() evaluated once per query
