@@ -1012,6 +1012,50 @@
     if (res.error) { toast("Couldn't load sales."); return; }
     state.sales = res.data || [];
     state.salesLoaded = true;
+    state.rangeCache = null; // sales changed: drop the cached date-range data
+  }
+
+  /* ---------- sales by date range (E1) ----------
+     Reports must not depend on the latest-50 list. This pages through the
+     database for every sale between two dates (including voids). */
+  async function fetchSalesRange(from, to) {
+    var out = [], PAGE = 500, offset = 0;
+    while (true) {
+      var res = await sb.from("sales").select("*, sale_items(*), payments(*)")
+        .gte("created_at", from.toISOString()).lte("created_at", to.toISOString())
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (res.error) throw res.error;
+      var rows = res.data || [];
+      out = out.concat(rows);
+      if (rows.length < PAGE) break;
+      offset += PAGE;
+    }
+    return out;
+  }
+  function rangeCovers(from, to) {
+    var c = state.rangeCache;
+    return !!c && c.from <= from.getTime() && c.to >= to.getTime();
+  }
+  // Resolves true when the cache covers [from,to]; false (with a toast) on failure.
+  async function ensureRange(from, to) {
+    if (rangeCovers(from, to)) return true;
+    try {
+      var rows = await fetchSalesRange(from, to);
+      state.rangeCache = { from: from.getTime(), to: to.getTime(), sales: rows };
+      return true;
+    } catch (e) {
+      toast("Couldn't load sales for that period.");
+      return false;
+    }
+  }
+  // All sales (including voids) in the range, from the cache when it covers it.
+  function rangeAll(from, to) {
+    var src = rangeCovers(from, to) ? state.rangeCache.sales : state.sales;
+    return src.filter(function (s) {
+      var t = new Date(s.created_at).getTime();
+      return t >= from.getTime() && t <= to.getTime();
+    });
   }
 
   async function logEntry(entry) {
@@ -3493,11 +3537,7 @@
   }
 
   function salesInRange(fromDate, toDate) {
-    return state.sales.filter(function (s) {
-      if (s.status === "void") return false;
-      var t = new Date(s.created_at);
-      return t >= fromDate && t <= toDate;
-    });
+    return rangeAll(fromDate, toDate).filter(function (s) { return s.status !== "void"; });
   }
 
   /* ================================================================
@@ -3513,26 +3553,26 @@
 
   function renderZReport() {
     var el = document.getElementById("zreportBody");
-    if (!state.salesLoaded) {
-      el.innerHTML = '<div class="empty" style="padding:40px">Loading sales…</div>';
-      loadSales().then(renderZReport);
-      return;
-    }
 
     // Today's completed sales
     var now = new Date();
     var y = now.getFullYear(), mo = now.getMonth(), d = now.getDate();
     var dayStart = new Date(y, mo, d);
     var dayEnd   = new Date(y, mo, d, 23, 59, 59, 999);
-    var daySales = state.sales.filter(function (s) {
-      return s.status !== "void" && new Date(s.created_at) >= dayStart && new Date(s.created_at) <= dayEnd;
-    });
+    if (!rangeCovers(dayStart, dayEnd)) {
+      el.innerHTML = '<div class="empty" style="padding:40px">Loading sales…</div>';
+      ensureRange(dayStart, dayEnd).then(function (ok) {
+        if (ok) renderZReport();
+        else el.innerHTML = '<div class="empty" style="padding:40px">Couldn\'t load today\'s sales. Check your connection and reopen.</div>';
+      });
+      return;
+    }
+    var dayAll   = rangeAll(dayStart, dayEnd);
+    var daySales = dayAll.filter(function (s) { return s.status !== "void"; });
 
     var netSales   = daySales.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
     var totalSales = daySales.reduce(function (a, s) { return a + Number(s.subtotal != null ? s.subtotal : s.total || 0); }, 0);
-    var voidSales  = state.sales.filter(function (s) {
-      return s.status === "void" && new Date(s.created_at) >= dayStart && new Date(s.created_at) <= dayEnd;
-    });
+    var voidSales  = dayAll.filter(function (s) { return s.status === "void"; });
     var voidTotal  = voidSales.reduce(function (a, s) { return a + Number(s.total || 0); }, 0);
     var totalDisc  = daySales.reduce(function (a, s) { return a + Number(s.discount || 0); }, 0);
     var txCount    = daySales.length;
@@ -3678,9 +3718,10 @@
 
   /* ---- hourly sales chart ---- */
   function renderHourlyChart(el) {
-    if (!state.salesLoaded) {
+    var _b = periodBounds(state.dashboardPeriod, state.dashFrom, state.dashTo);
+    if (!rangeCovers(_b.from, _b.to)) {
       el.innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
-      loadSales().then(function () { renderHourlyChart(el); });
+      ensureRange(_b.from, _b.to).then(function (ok) { if (ok) renderHourlyChart(el); });
       return;
     }
     // build date-range controls
@@ -3734,9 +3775,10 @@
 
   /* ---- slow movers ---- */
   function renderSlowMovers(el) {
-    if (!state.salesLoaded) {
+    var _b = periodBounds(state.dashboardPeriod, state.dashFrom, state.dashTo);
+    if (!rangeCovers(_b.from, _b.to)) {
       el.innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
-      loadSales().then(function () { renderSlowMovers(el); });
+      ensureRange(_b.from, _b.to).then(function (ok) { if (ok) renderSlowMovers(el); });
       return;
     }
     var bounds = periodBounds(state.dashboardPeriod, state.dashFrom, state.dashTo);
@@ -3872,14 +3914,12 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
-  function exportSalesCSV(fromStr, toStr, lineItems) {
-    if (!state.salesLoaded) { toast("Sales not loaded yet, please wait."); return; }
+  async function exportSalesCSV(fromStr, toStr, lineItems) {
     var from = new Date(fromStr + "T00:00:00");
     var to   = new Date(toStr   + "T23:59:59.999");
-    var sales = state.sales.filter(function (s) {
-      var t = new Date(s.created_at);
-      return t >= from && t <= to;
-    });
+    toast("Preparing export…");
+    if (!(await ensureRange(from, to))) return;
+    var sales = rangeAll(from, to);
     if (!sales.length) { toast("No sales in that date range."); return; }
 
     if (!lineItems) {
@@ -3971,6 +4011,7 @@
     // update local state
     var idx = state.sales.findIndex(function (s) { return s.id === saleId; });
     if (idx >= 0) state.sales[idx].status = "void";
+    state.rangeCache = null;
     // reload products so quantities are fresh
     await loadAll();
 
@@ -4036,12 +4077,8 @@
 
     renderDashboard = function () {
       // If custom period, use our own computeDashboard with custom bounds
-      if (state.dashboardPeriod === "custom" && state.dashFrom && state.dashTo) {
-        renderDashboardCustom();
-        return;
-      }
-      _origRenderDashboard();
-      appendDateRangeRow();
+      // Every period reads sales by date range (no 250-entry history cap).
+      renderDashboardCustom();
     };
   }
 
@@ -4077,8 +4114,24 @@
 
   function renderDashboardCustom() {
     // compute with our custom bounds
-    var bounds = periodBounds("custom", state.dashFrom, state.dashTo);
+    var isCustom = state.dashboardPeriod === "custom" && state.dashFrom && state.dashTo;
+    var bounds = isCustom ? periodBounds("custom", state.dashFrom, state.dashTo)
+                          : periodBounds(state.dashboardPeriod);
+    if (!isCustom) {
+      state.dashFrom = null; state.dashTo = null;
+    }
+    if (!rangeCovers(bounds.from, bounds.to)) {
+      document.getElementById("dashboardBody").innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
+      ensureRange(bounds.from, bounds.to).then(function (ok) {
+        if (ok) renderDashboardCustom();
+        else document.getElementById("dashboardBody").innerHTML = '<div class="empty" style="padding:40px">Couldn\'t load this period. Check your connection.</div>';
+      });
+      return;
+    }
     var sales = salesInRange(bounds.from, bounds.to);
+    function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+    var fromLbl = isCustom ? state.dashFrom : ymd(bounds.from);
+    var toLbl   = isCustom ? state.dashTo   : ymd(bounds.to);
 
     // product map for cost lookups
     var prodMap = {};
@@ -4114,17 +4167,17 @@
     var html =
       '<div class="dr-row" id="dashDrRow" style="margin-top:0">' +
         '<span style="font-size:12px;color:var(--muted)">Custom range:</span>' +
-        '<label style="font-size:12px;color:var(--muted)">From <input type="date" id="dashFromDate" value="' + esc(state.dashFrom) + '" /></label>' +
-        '<label style="font-size:12px;color:var(--muted)">To &nbsp;&nbsp;<input type="date" id="dashToDate" value="' + esc(state.dashTo)   + '" /></label>' +
+        '<label style="font-size:12px;color:var(--muted)">From <input type="date" id="dashFromDate" value="' + esc(fromLbl) + '" /></label>' +
+        '<label style="font-size:12px;color:var(--muted)">To &nbsp;&nbsp;<input type="date" id="dashToDate" value="' + esc(toLbl) + '" /></label>' +
         '<button class="toolbtn" style="font-size:11px;padding:5px 10px" id="dashApplyDr">Apply</button>' +
       '</div>' +
       '<div class="tabbar">' +
-        ['this-week','last-week','this-month','last-month'].map(function (id) {
+        ['today','this-week','last-week','this-month','last-month'].map(function (id) {
           var lbl = id.replace(/-/g," ").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
-          return '<button class="tab" data-period="' + id + '">' + lbl + '</button>';
+          return '<button class="tab' + (!isCustom && state.dashboardPeriod === id ? ' active' : '') + '" data-period="' + id + '">' + lbl + '</button>';
         }).join("") +
       '</div>' +
-      '<div class="dash-period">' + esc(state.dashFrom) + ' → ' + esc(state.dashTo) + ' · ' + sales.length + ' sales</div>' +
+      '<div class="dash-period">' + esc(fromLbl) + ' → ' + esc(toLbl) + ' · ' + sales.length + ' sales</div>' +
       '<div class="dash-cards">' +
         cardHtml("Items Sold", unitsSold.toLocaleString(), "var(--text)", "") +
         cardHtml("Revenue", money(revenue), "var(--accent)", "") +
