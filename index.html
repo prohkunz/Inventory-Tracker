@@ -1351,35 +1351,67 @@
       return obj;
     });
 
+    if (state.completing) return;            // ignore double taps while a sale is in flight
+    state.completing = true;
     setSync("busy");
     var btn = document.getElementById("completeSaleBtn");
     if (btn) btn.disabled = true;
-    var res = await sb.rpc("record_sale", {
-      p_items: items,
-      p_payments: payments,
-      p_discount: +(state.saleDiscount || 0).toFixed(2),
-      p_discount_note: state.saleDiscountNote || "",
-      p_note: ""
-    });
-    if (btn) btn.disabled = false;
-    if (res.error) {
+    var sh0 = activeShift();
+    if (!sh0 && !state._noShiftHinted) {
+      state._noShiftHinted = true;
+      toast("Tip: start a cash shift (💵 Cash) so sales count toward the drawer.");
+    }
+    // Every sale carries a unique key made here. If the connection drops at any
+    // point the same key is re-sent, so the database can never record it twice.
+    var entry = {
+      key: newSaleKey(), items: items, payments: payments,
+      discount: +(state.saleDiscount || 0).toFixed(2),
+      discountNote: state.saleDiscountNote || "",
+      soldAt: new Date().toISOString(),
+      shiftId: sh0 ? sh0.id : null,
+      heldId: state.heldId || null,
+      status: "pending", tries: 0, total: total
+    };
+    var out = await trySendSale(entry, false);
+    var queued = false, saleId = null;
+    if (out.ok) {
+      saleId = out.id;
+    } else if (out.retry) {
+      if (!queueAdd(entry)) {
+        state.completing = false;
+        if (btn) btn.disabled = false;
+        setSync("off");
+        toast("Can't save this sale on the device (storage full). Free some space and try again.");
+        return;
+      }
+      queued = true;
+      saleId = "pending-" + entry.key;
+      applyLocalStock(entry);
+    } else {
+      state.completing = false;
+      if (btn) btn.disabled = false;
       setSync("off");
-      toast("Sale failed: " + res.error.message);
+      toast("Sale failed: " + out.message);
       return;
     }
+    state.completing = false;
+    if (btn) btn.disabled = false;
 
-    // link the sale to the active cash shift (Batch D)
-    await tagSaleShift(res.data);
-
-    // If this was a held sale, delete the held record now that we sold it
+    // If this was a held sale, remove the held record (queued sales do it after syncing)
     if (state.heldId) {
-      try { await sb.from("held_sales").delete().eq("id", state.heldId); } catch (e) {}
+      if (queued) {
+        var hid = state.heldId;
+        state.held = (state.held || []).filter(function (h) { return h.id !== hid; });
+        renderHeldBadge();
+      } else {
+        try { await sb.from("held_sales").delete().eq("id", state.heldId); } catch (e) {}
+      }
     }
 
     // Build receipt locally from cart (before clearing)
     var firstCashPay = state.payments.filter(function (p) { return p.method === "cash"; })[0];
     var receipt = {
-      id: res.data,
+      id: saleId, pending: queued,
       items: state.cart.map(function (l) {
         return {
           name: l.name, quantity: l.quantity,
@@ -1400,9 +1432,17 @@
     };
 
     clearCart();
-    setSync("ok");
-    await loadAll();
-    if (state.salesLoaded) await loadSales();
+    if (queued) {
+      setSync("off");
+      updateQueueBadge();
+      render();
+      toast("Offline — sale saved on this device and will sync automatically");
+      flushSoon();
+    } else {
+      setSync("ok");
+      await loadAll();
+      if (state.salesLoaded) await loadSales();
+    }
     showReceipt(receipt);
     if (settings.autoPrint) {
       setTimeout(function () { printReceipt(receipt); }, 200);
@@ -2293,7 +2333,9 @@
       '<div class="check">✅</div>' +
       '<div class="ttl">Sale Complete</div>' +
       '<div class="sub">' + fmtDateTime(r.timestamp) + '</div>' +
-      '<div class="sub">Ref: ' + esc(String(r.id).slice(0, 8).toUpperCase()) + '</div>' +
+      (r.pending
+        ? '<div class="sub" style="color:var(--warn)">Saved on this device · will sync when online</div>'
+        : '<div class="sub">Ref: ' + esc(String(r.id).slice(0, 8).toUpperCase()) + '</div>') +
       '</div>';
     html += '<div class="receipt-items">' + r.items.map(function (it) {
       var ld = it.lineDiscount || 0;
@@ -2618,6 +2660,7 @@
     wireBatchC();
     // Batch D
     wireBatchD();
+    wireBatchE();
     // config save
     document.getElementById("cfgSaveBtn").addEventListener("click", function () {
       var url = document.getElementById("cfgUrl").value.trim();
@@ -4569,6 +4612,11 @@
       var cv = document.getElementById("cashCounted").value;
       if (cv === "" || !(Number(cv) >= 0)) { cashErr("Enter the counted cash."); return; }
       var counted = Number(cv);
+      if (pendingCount() > 0) {
+        cashErr("Some offline sales haven't synced yet. Wait for the badge at the top to clear, then close the shift.");
+        flushSoon();
+        return;
+      }
       var note = document.getElementById("cashCloseNote").value.trim();
       setSync("busy");
       await loadCash();                       // refresh so expected includes any late sales
@@ -4622,6 +4670,236 @@
     }
     return '<div class="zr-section"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Cash Drawers</div>' +
       rows + '<button class="toolbtn" id="zrCashBtn" style="margin-top:10px;font-size:12px">💵 Open Cash Drawer</button></div>';
+  }
+
+
+  /* ================================================================
+     E5 — OFFLINE-SAFE SELLING WITH NO DUPLICATES
+     - every sale gets a unique key on the device (sales.client_key)
+     - sales that can't reach the server are saved on the device first
+     - they are re-sent in order until the server confirms; re-sending
+       the same key can never create a second sale
+     ================================================================ */
+
+  function newSaleKey() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var b = new Uint8Array(16); crypto.getRandomValues(b);
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    var h = Array.prototype.map.call(b, function (x) { return ("0" + x.toString(16)).slice(-2); }).join("");
+    return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20);
+  }
+  function qKey()  { return "inv.salequeue.v1." + (user ? user.id : "anon"); }
+  function qRead() {
+    try { var a = JSON.parse(localStorage.getItem(qKey()) || "[]"); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function qWrite(a) {
+    try { localStorage.setItem(qKey(), JSON.stringify(a)); return true; } catch (e) { return false; }
+  }
+  function queueAdd(entry) {
+    var a = qRead(); a.push(entry);
+    if (!qWrite(a)) return false;
+    // read it back: only report "saved" if it really is on the device
+    return qRead().some(function (x) { return x.key === entry.key; });
+  }
+  function queueRemove(key) { qWrite(qRead().filter(function (x) { return x.key !== key; })); }
+  function queueUpdate(key, patch) {
+    qWrite(qRead().map(function (x) { return x.key === key ? Object.assign({}, x, patch) : x; }));
+  }
+  function pendingCount() { return qRead().length; }
+
+  function withTimeout(thenable, ms) {
+    return new Promise(function (resolve) {
+      var t = setTimeout(function () { resolve({ error: { message: "timeout", code: "" } }); }, ms);
+      thenable.then(
+        function (r) { clearTimeout(t); resolve(r); },
+        function (e) { clearTimeout(t); resolve({ error: { message: String((e && e.message) || e), code: "" } }); }
+      );
+    });
+  }
+  // ok -> saved on the server; retry -> couldn't tell / couldn't reach (safe to re-send
+  // with the same key); neither -> the server rejected it (e.g. product deleted)
+  async function trySendSale(entry, fromQueue) {
+    if (navigator.onLine === false) return { retry: true, message: "offline" };
+    var res = await withTimeout(sb.rpc("record_sale_v2", {
+      p_items: entry.items, p_payments: entry.payments,
+      p_discount: entry.discount, p_discount_note: entry.discountNote, p_note: "",
+      p_client_key: entry.key, p_shift_id: entry.shiftId,
+      p_sold_at: entry.soldAt, p_offline: !!fromQueue
+    }), 20000);
+    if (!res.error) return { ok: true, id: res.data };
+    var c = String(res.error.code || ""), m = String(res.error.message || "");
+    if (!c || /^PGRST3/.test(c) || /^08/.test(c) || c === "40P01" || c === "40001" || c === "57014" ||
+        /not authenticated|jwt/i.test(m)) return { retry: true, message: m };
+    return { message: m };
+  }
+
+  function applyLocalStock(entry) {
+    entry.items.forEach(function (it) {
+      if (it.is_custom || !it.product_id) return;
+      var p = findProduct(it.product_id);
+      if (p) p.quantity -= it.quantity;
+    });
+  }
+  // stock shown on screen = server stock minus sales still waiting to sync
+  function applyPendingToProducts() {
+    var q = qRead();
+    if (!q.length) return false;
+    q.forEach(applyLocalStock);
+    return true;
+  }
+
+  var flushing = false, flushTimer = null;
+  function flushSoon() { clearTimeout(flushTimer); flushTimer = setTimeout(flushQueue, 300); }
+  async function flushQueue() {
+    if (flushing || !sb || !user) return;
+    var q0 = qRead().filter(function (e) { return e.status !== "failed"; });
+    if (!q0.length) { updateQueueBadge(); return; }
+    flushing = true;
+    var synced = 0;
+    try {
+      for (var i = 0; i < q0.length; i++) {
+        var e = q0[i];
+        var out = await trySendSale(e, true);
+        if (out.ok) {
+          queueRemove(e.key);
+          synced++;
+          if (e.heldId) { try { await sb.from("held_sales").delete().eq("id", e.heldId); } catch (x) {} }
+        } else if (out.retry) {
+          queueUpdate(e.key, { tries: (e.tries || 0) + 1, lastError: out.message });
+          break;                                   // keep the order; try again later
+        } else {
+          queueUpdate(e.key, { status: "failed", lastError: out.message });
+        }
+        updateQueueBadge();
+      }
+    } finally {
+      flushing = false;
+      updateQueueBadge();
+    }
+    if (synced > 0) {
+      toast(synced + " offline sale" + (synced > 1 ? "s" : "") + " synced");
+      await loadAll();
+      if (state.salesLoaded) await loadSales();
+      try { await loadCash(); } catch (x) {}
+    }
+  }
+
+  /* ---- badge + review panel ---- */
+  function updateQueueBadge() {
+    var b = document.getElementById("queueBadge");
+    if (!b) return;
+    var q = qRead();
+    var failed = q.filter(function (e) { return e.status === "failed"; }).length;
+    var waiting = q.length - failed;
+    b.classList.toggle("hidden", q.length === 0);
+    b.textContent = failed
+      ? "⚠ " + failed + " sale" + (failed > 1 ? "s" : "") + " need attention" + (waiting ? " · " + waiting + " waiting" : "")
+      : "⏳ " + waiting + " sale" + (waiting > 1 ? "s" : "") + " waiting to sync";
+    b.style.color = failed ? "var(--bad)" : "var(--warn)";
+    if (!document.getElementById("queueOverlay").classList.contains("hidden")) renderQueuePanel();
+  }
+  function renderQueuePanel() {
+    var q = qRead();
+    var el = document.getElementById("queueBody");
+    if (!q.length) { el.innerHTML = '<div class="empty" style="padding:30px">All sales are synced ✓</div>'; return; }
+    el.innerHTML =
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">These sales are safely stored on this device and are sent automatically when the connection is back. Sending twice cannot create a duplicate.</div>' +
+      q.map(function (e) {
+        var failed = e.status === "failed";
+        var items = (e.items || []).map(function (i) { return i.quantity + "× " + esc(i.name); }).join(", ");
+        return '<div class="zr-section" style="margin-bottom:10px">' +
+          '<div style="display:flex;justify-content:space-between;gap:10px"><strong>' + money(e.total) + '</strong>' +
+          '<span style="font-size:12px;color:var(--muted)">' + esc(fmtDate(e.soldAt)) + '</span></div>' +
+          '<div style="font-size:12px;margin:4px 0">' + items + '</div>' +
+          '<div style="font-size:12px;color:' + (failed ? "var(--bad)" : "var(--warn)") + '">' +
+            (failed ? "Rejected: " + esc(e.lastError || "") : "Waiting to sync" + (e.tries ? " · tried " + e.tries + "×" : "")) + '</div>' +
+          (failed ? '<div style="margin-top:8px;display:flex;gap:8px">' +
+            '<button class="toolbtn" data-q-retry="' + esc(e.key) + '" style="font-size:12px;padding:6px 10px">Retry</button>' +
+            '<button class="toolbtn" data-q-drop="' + esc(e.key) + '" style="font-size:12px;padding:6px 10px">Remove from device</button></div>' : '') +
+          '</div>';
+      }).join("") +
+      '<div style="margin-top:12px"><button class="addbtn" id="queueSyncNow">Sync now</button></div>';
+    document.getElementById("queueSyncNow").addEventListener("click", function () { flushSoon(); toast("Syncing…"); });
+    el.querySelectorAll("[data-q-retry]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        queueUpdate(b.getAttribute("data-q-retry"), { status: "pending", lastError: "" });
+        updateQueueBadge(); flushSoon();
+      });
+    });
+    el.querySelectorAll("[data-q-drop]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (!confirm("Remove this sale from the device? It was never saved to your records, so write it down first if you need it.")) return;
+        queueRemove(b.getAttribute("data-q-drop"));
+        updateQueueBadge();
+      });
+    });
+  }
+
+  /* ---- last-known data so the till still opens without a connection ---- */
+  function snapKey(n) { return "inv.snap." + n + ".v1." + (user ? user.id : "anon"); }
+  function snapSave(n, obj) { try { localStorage.setItem(snapKey(n), JSON.stringify(obj)); } catch (e) {} }
+  function snapLoad(n) { try { return JSON.parse(localStorage.getItem(snapKey(n)) || "null"); } catch (e) { return null; } }
+
+  function wireBatchE() {
+    // badge + panel
+    var bar = document.querySelector(".syncbar");
+    var badge = document.createElement("button");
+    badge.id = "queueBadge"; badge.className = "toolbtn hidden";
+    badge.style.cssText = "font-size:11px;padding:4px 10px;margin-left:8px";
+    bar.appendChild(badge);
+    var ov = document.createElement("div");
+    ov.className = "overlay hidden"; ov.id = "queueOverlay";
+    ov.innerHTML = '<div class="modal"><div class="mhead"><span style="font-size:18px">⏳</span>' +
+      '<span class="mtitle">Offline sales</span><span class="x" id="queueClose">✕</span></div>' +
+      '<div class="mbody padded" id="queueBody"></div></div>';
+    document.body.appendChild(ov);
+    badge.addEventListener("click", function () { renderQueuePanel(); ov.classList.remove("hidden"); });
+    document.getElementById("queueClose").addEventListener("click", function () { ov.classList.add("hidden"); });
+    ov.addEventListener("click", function (e) { if (e.target === ov) ov.classList.add("hidden"); });
+
+    // stock on screen includes sales still waiting; remember last good data for offline start
+    var _origLoadAll = loadAll;
+    loadAll = async function () {
+      var before = state.products;
+      await _origLoadAll();
+      if (state.products !== before) {                 // loaded from the server
+        snapSave("products", { products: state.products, ts: Date.now() });
+      } else if (!state.products.length) {             // couldn't reach the server
+        var snap = snapLoad("products");
+        if (snap && snap.products && snap.products.length) {
+          state.products = snap.products;
+          toast("Offline — showing your last saved stock");
+        }
+      }
+      if (applyPendingToProducts()) render();
+      updateQueueBadge();
+      if (pendingCount()) flushSoon();
+    };
+    var _origLoadCash = loadCash;
+    loadCash = async function () {
+      var before = state.shifts;
+      await _origLoadCash();
+      if (state.shifts !== before) {
+        snapSave("cash", { drawers: state.drawers, shifts: state.shifts, activeDrawerId: state.activeDrawerId,
+          shiftMoves: state.shiftMoves, shiftCash: state.shiftCash, shiftSaleCount: state.shiftSaleCount });
+      } else if (!state.shifts.length) {
+        var c = snapLoad("cash");
+        if (c && c.drawers) {
+          state.drawers = c.drawers; state.shifts = c.shifts || [];
+          state.activeDrawerId = state.activeDrawerId || c.activeDrawerId;
+          state.shiftMoves = c.shiftMoves || {}; state.shiftCash = c.shiftCash || {};
+          state.shiftSaleCount = c.shiftSaleCount || {};
+          state.cashLoaded = true; updateCashBtn();
+        }
+      }
+    };
+
+    window.addEventListener("online", function () { toast("Back online"); flushSoon(); });
+    window.addEventListener("offline", function () { setSync("off"); updateQueueBadge(); });
+    document.addEventListener("visibilitychange", function () { if (!document.hidden && pendingCount()) flushSoon(); });
+    setInterval(function () { if (pendingCount()) flushSoon(); }, 15000);
+    updateQueueBadge();
   }
 
   function wireBatchD() {
